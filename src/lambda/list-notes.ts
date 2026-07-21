@@ -20,17 +20,69 @@ export const handler = async (
     };
   }
 
+  const params = event.queryStringParameters ?? {};
+  const limit = Math.min(Number(params.limit) || 20, 100);
+  const cursor = params.cursor;
+  const searchQuery = params.search?.toLowerCase();
+  const tagsFilter = params.tags ? params.tags.split(',').map((t) => t.trim().toLowerCase()) : null;
+  const fromDate = params.from ?? null;
+  const toDate = params.to ?? null;
+
+  // Build query — we always query by userId (partition key)
+  // Filtering is done in-memory after query since DynamoDB filter expressions
+  // on lists and contains are limited. For a personal notes app (<1000 notes), this is fine.
   const result = await client.send(
     new QueryCommand({
       TableName: TABLE_NAME,
       KeyConditionExpression: 'userId = :uid',
       ExpressionAttributeValues: { ':uid': userId },
+      ...(cursor ? { ExclusiveStartKey: { userId, noteId: cursor } } : {}),
     }),
   );
+
+  let notes = result.Items ?? [];
+
+  // Apply filters in-memory
+  if (tagsFilter && tagsFilter.length > 0) {
+    notes = notes.filter((note) => {
+      const noteTags = (note.tags as string[] | undefined) ?? [];
+      return tagsFilter.some((tag) => noteTags.includes(tag));
+    });
+  }
+
+  if (fromDate) {
+    notes = notes.filter((note) => (note.createdAt as string) >= fromDate);
+  }
+
+  if (toDate) {
+    // Add end-of-day to make "to" inclusive
+    const toEnd = toDate.includes('T') ? toDate : `${toDate}T23:59:59.999Z`;
+    notes = notes.filter((note) => (note.createdAt as string) <= toEnd);
+  }
+
+  if (searchQuery) {
+    notes = notes.filter((note) => {
+      const title = ((note.title as string) ?? '').toLowerCase();
+      const content = ((note.content as string) ?? '').toLowerCase();
+      return title.includes(searchQuery) || content.includes(searchQuery);
+    });
+  }
+
+  // Sort by updatedAt descending
+  notes.sort((a, b) =>
+    (b.updatedAt as string).localeCompare(a.updatedAt as string),
+  );
+
+  // Paginate
+  const paginatedNotes = notes.slice(0, limit);
+  const nextCursor =
+    paginatedNotes.length === limit && notes.length > limit
+      ? (paginatedNotes[paginatedNotes.length - 1].noteId as string)
+      : null;
 
   return {
     statusCode: 200,
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ notes: result.Items ?? [] }),
+    body: JSON.stringify({ notes: paginatedNotes, nextCursor }),
   };
 };
