@@ -3,8 +3,19 @@ import * as cognito from 'aws-cdk-lib/aws-cognito';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as apigateway from 'aws-cdk-lib/aws-apigateway';
+import * as acm from 'aws-cdk-lib/aws-certificatemanager';
+import * as route53 from 'aws-cdk-lib/aws-route53';
+import * as targets from 'aws-cdk-lib/aws-route53-targets';
+import * as s3 from 'aws-cdk-lib/aws-s3';
+import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
+import * as origins from 'aws-cdk-lib/aws-cloudfront-origins';
+import * as s3deploy from 'aws-cdk-lib/aws-s3-deployment';
 import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { Construct } from 'constructs';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 export class McpNotesStack extends cdk.Stack {
   public readonly userPool: cognito.UserPool;
@@ -30,19 +41,6 @@ export class McpNotesStack extends cdk.Stack {
       accountRecovery: cognito.AccountRecovery.NONE,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
-
-    // PreSignUp trigger: auto-confirm users, auto-verify email
-    const preSignUpFn = new lambda.Function(this, 'PreSignUpFn', {
-      runtime: lambda.Runtime.NODEJS_20_X,
-      handler: 'pre-sign-up.handler',
-      code: lambda.Code.fromAsset(path.join(__dirname, '..', 'src', 'lambda')),
-      description: 'Auto-confirm users and verify email on signup',
-    });
-
-    this.userPool.addTrigger(
-      cognito.UserPoolOperation.PRE_SIGN_UP,
-      preSignUpFn,
-    );
 
     // User Pool Client: public client (no secret), USER_PASSWORD_AUTH
     this.userPoolClient = this.userPool.addClient('McpNotesClient', {
@@ -166,6 +164,159 @@ export class McpNotesStack extends cdk.Stack {
       authorizationOptions,
     );
 
+    // ─── DNS & Certificates ────────────────────────────────────────────────
+    const hostedZone = route53.HostedZone.fromHostedZoneAttributes(
+      this,
+      'NotlaiZone',
+      {
+        hostedZoneId: 'Z00190361DHV3BI03ZMC5',
+        zoneName: 'notlai.com',
+      },
+    );
+
+    const cloudfrontCertificate = acm.Certificate.fromCertificateArn(
+      this,
+      'CloudFrontCert',
+      'arn:aws:acm:us-east-1:171161696369:certificate/c7e5f78a-4a3a-4c3e-bf97-b3c6b99c8d82',
+    );
+
+    const apiCertificate = acm.Certificate.fromCertificateArn(
+      this,
+      'ApiGatewayCert',
+      'arn:aws:acm:eu-west-1:171161696369:certificate/ab893409-9541-4092-8ca9-73bad470be95',
+    );
+
+    // ─── API Gateway Custom Domain ──────────────────────────────────────
+    const apiDomainName = new apigateway.DomainName(this, 'ApiDomainName', {
+      domainName: 'api.notlai.com',
+      certificate: apiCertificate,
+      endpointType: apigateway.EndpointType.REGIONAL,
+      securityPolicy: apigateway.SecurityPolicy.TLS_1_2,
+    });
+
+    apiDomainName.addBasePathMapping(this.api);
+
+    // ─── Frontend Hosting (S3 + CloudFront) ──────────────────────────────
+    const websiteBucket = new s3.Bucket(this, 'McpNotesFrontendBucket', {
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      autoDeleteObjects: true,
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+    });
+
+    // CloudFront Function to redirect bare domain to www
+    const redirectFunction = new cloudfront.Function(
+      this,
+      'RedirectToWwwFunction',
+      {
+        code: cloudfront.FunctionCode.fromInline(`
+function handler(event) {
+  var request = event.request;
+  var host = request.headers.host.value;
+  if (host === 'notlai.com') {
+    return {
+      statusCode: 301,
+      statusDescription: 'Moved Permanently',
+      headers: {
+        location: { value: 'https://www.notlai.com' + request.uri }
+      }
+    };
+  }
+  return request;
+}
+`),
+        functionName: 'mcp-notes-redirect-to-www',
+      },
+    );
+
+    const distribution = new cloudfront.Distribution(
+      this,
+      'McpNotesFrontendDist',
+      {
+        defaultBehavior: {
+          origin: origins.S3BucketOrigin.withOriginAccessControl(websiteBucket),
+          viewerProtocolPolicy:
+            cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+          functionAssociations: [
+            {
+              function: redirectFunction,
+              eventType: cloudfront.FunctionEventType.VIEWER_REQUEST,
+            },
+          ],
+        },
+        domainNames: ['www.notlai.com', 'notlai.com'],
+        certificate: cloudfrontCertificate,
+        defaultRootObject: 'index.html',
+        errorResponses: [
+          {
+            httpStatus: 403,
+            responsePagePath: '/index.html',
+            responseHttpStatus: 200,
+          },
+          {
+            httpStatus: 404,
+            responsePagePath: '/index.html',
+            responseHttpStatus: 200,
+          },
+        ],
+      },
+    );
+
+    new s3deploy.BucketDeployment(this, 'McpNotesFrontendDeploy', {
+      sources: [s3deploy.Source.asset(path.join(__dirname, '..', 'dist', 'frontend'))],
+      destinationBucket: websiteBucket,
+      distribution,
+      distributionPaths: ['/*'],
+    });
+
+    // ─── Route53 DNS Records ─────────────────────────────────────────────
+    new route53.ARecord(this, 'WwwARecord', {
+      zone: hostedZone,
+      recordName: 'www.notlai.com',
+      target: route53.RecordTarget.fromAlias(
+        new targets.CloudFrontTarget(distribution),
+      ),
+    });
+
+    new route53.AaaaRecord(this, 'WwwAaaaRecord', {
+      zone: hostedZone,
+      recordName: 'www.notlai.com',
+      target: route53.RecordTarget.fromAlias(
+        new targets.CloudFrontTarget(distribution),
+      ),
+    });
+
+    new route53.ARecord(this, 'ApexARecord', {
+      zone: hostedZone,
+      recordName: 'notlai.com',
+      target: route53.RecordTarget.fromAlias(
+        new targets.CloudFrontTarget(distribution),
+      ),
+    });
+
+    new route53.AaaaRecord(this, 'ApexAaaaRecord', {
+      zone: hostedZone,
+      recordName: 'notlai.com',
+      target: route53.RecordTarget.fromAlias(
+        new targets.CloudFrontTarget(distribution),
+      ),
+    });
+
+    new route53.ARecord(this, 'ApiARecord', {
+      zone: hostedZone,
+      recordName: 'api.notlai.com',
+      target: route53.RecordTarget.fromAlias(
+        new targets.ApiGatewayDomain(apiDomainName),
+      ),
+    });
+
+    new route53.AaaaRecord(this, 'ApiAaaaRecord', {
+      zone: hostedZone,
+      recordName: 'api.notlai.com',
+      target: route53.RecordTarget.fromAlias(
+        new targets.ApiGatewayDomain(apiDomainName),
+      ),
+    });
+
     // ─── Outputs ─────────────────────────────────────────────────────────
     new cdk.CfnOutput(this, 'UserPoolId', {
       value: this.userPool.userPoolId,
@@ -180,7 +331,11 @@ export class McpNotesStack extends cdk.Stack {
     });
 
     new cdk.CfnOutput(this, 'ApiUrl', {
-      value: this.api.url,
+      value: 'https://api.notlai.com',
+    });
+
+    new cdk.CfnOutput(this, 'FrontendUrl', {
+      value: 'https://www.notlai.com',
     });
   }
 }
