@@ -2,88 +2,106 @@
 
 ## Overview
 
-Provide a minimal web interface at `www.notlai.com` where authenticated users can view, create, edit, and delete their personal notes. The app currently only exposes signup/login screens; this spec adds the authenticated "notes dashboard" experience.
+A read-only web interface at `www.notlai.com` that lets an authenticated user browse, filter, search, and read notes they created via their LLM (Claude, ChatGPT, Mistral…) and the MCP server. This is **not** a second editing surface — no creation, modification, or deletion is possible from this view.
 
 ## Actors
 
-- **Authenticated User**: A user who has signed up and confirmed their email via Cognito, and holds a valid session (ID token).
+- **Note owner**: The user who created notes via their LLM. They authenticate with the same Cognito account linked to the MCP server.
 
 ## Functional Requirements
 
-### REQ-1: Authentication gate
+### REQ-1: Authentication
 
-- After login, the user is redirected to the notes dashboard.
-- If the user's token is expired or absent, redirect to the login page (`?action=login`).
+- The user logs in with the same credentials used by their LLM/MCP integration (single identity, Cognito User Pool).
+- After successful login, the user lands directly on their notes list — no manual sync step.
 - Tokens (idToken, refreshToken) are stored in `localStorage`.
-- Silently refresh the session using the refresh token when the ID token expires.
+- Silent token refresh using the refresh token when the ID token expires.
+- If the session is invalid or expired beyond refresh, redirect to the login page.
 
-### REQ-2: Notes list view
+### REQ-2: Notes list
 
-- Display all user notes in reverse-chronological order (most recent first, by `updatedAt`).
-- Each note shows: title, first 120 characters of content as preview, and relative time since last update.
-- Empty state: display a message inviting the user to create their first note.
-- A "New note" button is always visible.
+- Display all user notes in reverse-chronological order (most recent `updatedAt` first).
+- Each list entry shows:
+  - An excerpt of the content (first ~120 characters).
+  - Associated tags.
+  - Creation date.
+- Pagination or infinite scroll when the number of notes exceeds a threshold (to be defined based on typical usage — start with paginated batches of 20).
+- Empty state: message indicating no notes have been created yet, inviting the user to use their LLM.
 
-### REQ-3: Create a note
+### REQ-3: Filtering
 
-- Clicking "New note" opens an inline editor (not a separate page).
-- Fields: title (required, max 200 chars) and content (plain text, optional, max 10 000 chars).
-- On submit, call `POST /notes` on `api.notlai.com` with the Cognito ID token as `Authorization` header.
-- On success, prepend the new note to the list and close the editor.
-- On error, display the error message inline.
+- Filter by tag: select one or multiple tags; show only notes that carry at least one selected tag.
+- Filter by period: predefined shortcuts ("cette semaine", "ce mois-ci") and a custom date range picker.
+- Both filters can be combined (AND logic: matching tags AND within the selected period).
+- Active filters are visually indicated and individually dismissable.
 
-### REQ-4: View / Edit a note
+### REQ-4: Search
 
-- Clicking a note in the list opens it in the editor with pre-filled title and content.
-- The user can modify title and/or content and save (`PUT /notes/{noteId}`).
-- A "Cancel" action discards unsaved changes and returns to the list.
-- On success, update the note in the list.
+- Free-text search field over note content and title.
+- Results updated after the user submits (press Enter / click search) — not real-time, to keep it simple with a server-side query.
+- Search can be combined with active filters.
+- Clear search action resets to the full filtered list.
 
-### REQ-5: Delete a note
+### REQ-5: Note detail view
 
-- Each note (in list or in editor view) has a delete action.
-- Deletion requires confirmation (e.g., "Supprimer cette note ?").
-- On confirm, call `DELETE /notes/{noteId}`.
-- On success, remove the note from the list.
+- Clicking a note in the list opens a full view of the note.
+- Displays: full content, all tags, creation date, last modification date.
+- No edit or delete action is visible or accessible — strictly read-only.
+- A "back to list" action returns to the list, preserving active filters and scroll position.
 
 ### REQ-6: Logout
 
 - A logout button clears stored tokens and redirects to the login page.
 
-### REQ-7: Responsive design
+### REQ-7: Freshness guarantee
 
-- The view must be usable on mobile (≥ 320px) and desktop.
-- No external CSS framework; use the existing `styles.css` approach (plain CSS).
-
-### REQ-8: API integration
-
-- All API calls go to `https://api.notlai.com` (the custom domain configured for API Gateway).
-- Authorization header: `Bearer <idToken>`.
-- Handle 401 responses by redirecting to login.
+- A note deleted or modified via the LLM/MCP must be reflected on the next page load or list refresh — no stale cache.
+- The list fetches fresh data from the API on every navigation to the list view (no aggressive client-side caching of note data).
 
 ## Non-functional Requirements
 
-### NFR-1: Performance
+### NFR-1: Responsive design
+
+- Usable on mobile (≥ 320px width) and desktop.
+- No external CSS framework; plain CSS following the existing project style.
+
+### NFR-2: Performance
 
 - Initial load (after cache) under 1s on 4G.
-- The frontend bundle (JS + CSS) stays under 50 KB gzipped.
+- Frontend bundle (JS + CSS) stays under 50 KB gzipped.
 
-### NFR-2: Tech constraints
+### NFR-3: Tech constraints
 
-- React 19 (already in deps), no additional framework (no router library — simple state-based navigation).
+- React 19 (already in deps), no additional framework or routing library — state-based navigation.
 - esbuild for bundling (already configured).
-- No SSR — fully client-side SPA served from S3/CloudFront.
+- Fully client-side SPA served from S3/CloudFront. No SSR.
 
-### NFR-3: Accessibility
+### NFR-4: Accessibility
 
 - All interactive elements are keyboard-navigable.
 - Form inputs have associated labels.
-- Status messages use `aria-live` regions.
+- Status messages and loading states use `aria-live` regions.
 
-## Out of scope
+### NFR-5: API integration
 
-- Rich text / markdown editing (plain text only for now).
-- Search or filtering of notes.
-- Sharing notes with other users.
+- All API calls to `https://api.notlai.com`.
+- Authorization: `Bearer <idToken>` header.
+- Handle 401 responses by clearing session and redirecting to login.
+
+## Business Rules
+
+- **Strictly read-only**: no create, edit, or delete actions exposed in this interface, even though the underlying API supports them.
+- **Isolation**: a user only sees their own notes.
+- **No stale data**: a note deleted via the LLM disappears from the web view on the next consultation (see REQ-7).
+
+## Out of Scope
+
+- Creating, editing, or deleting notes from the web.
+- Sharing notes with other users (treated separately).
+- Organization into folders or workspaces.
 - Offline support / service worker.
-- Note tagging or categorization.
+- Rich text rendering (notes displayed as plain text for now).
+
+## Success Criterion
+
+A user can find, filter, and read any of their notes from a browser without ever needing to open their LLM, and without any possibility of accidentally altering content from this interface.
