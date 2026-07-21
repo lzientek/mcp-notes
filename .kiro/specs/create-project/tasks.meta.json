@@ -1,0 +1,37 @@
+{
+  "pbtResults": {
+    "2.2 Write property test for email validation (Property 1)": {
+      "status": "passed",
+      "lastRunTimestamp": 1784556488147
+    },
+    "2.3 Write property test for password validation (Property 2)": {
+      "status": "passed",
+      "lastRunTimestamp": 1784556490514
+    },
+    "3.2 Write property test for credential file round-trip (Property 3)": {
+      "status": "passed",
+      "lastRunTimestamp": 1784556490541
+    },
+    "3.3 Write property test for credential file permissions (Property 4)": {
+      "status": "passed",
+      "lastRunTimestamp": 1784556490561
+    },
+    "3.4 Write property test for token expiration detection (Property 8)": {
+      "status": "passed",
+      "lastRunTimestamp": 1784556490579
+    },
+    "4.2 Write property test for error mapping completeness (Property 5)": {
+      "status": "passed",
+      "lastRunTimestamp": 1784556490597
+    },
+    "4.3 Write property test for error mapping non-leakage (Property 6)": {
+      "status": "passed",
+      "lastRunTimestamp": 1784556490616
+    },
+    "6.5 Write property test for data isolation (Property 7)": {
+      "status": "passed",
+      "lastRunTimestamp": 1784556765384
+    }
+  },
+  "executionHistory": {}
+}
