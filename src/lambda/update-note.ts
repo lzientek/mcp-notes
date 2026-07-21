@@ -1,9 +1,11 @@
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, PutCommand, GetCommand } from '@aws-sdk/lib-dynamodb';
+import { validateTags } from './helpers/validate-tags.js';
 
 const client = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const TABLE_NAME = process.env.TABLE_NAME!;
+const TAGS_TABLE_NAME = process.env.TAGS_TABLE_NAME!;
 
 export const handler = async (
   event: APIGatewayProxyEvent,
@@ -32,7 +34,7 @@ export const handler = async (
     };
   }
 
-  let body: { title?: string; content?: string };
+  let body: { title?: string; content?: string; tags?: string[] };
   try {
     body = JSON.parse(event.body ?? '{}');
   } catch {
@@ -65,10 +67,30 @@ export const handler = async (
     };
   }
 
+  // Validate tags if provided
+  let tags: string[] | undefined;
+  if (body.tags !== undefined) {
+    tags = body.tags.map((t) => t.toLowerCase());
+    if (tags.length > 0) {
+      const validation = await validateTags(client, TAGS_TABLE_NAME, userId, tags);
+      if (!validation.valid) {
+        return {
+          statusCode: 400,
+          body: JSON.stringify({
+            code: 'INVALID_TAGS',
+            message: 'Some tags do not exist.',
+            invalidTags: validation.invalidTags,
+          }),
+        };
+      }
+    }
+  }
+
   const updatedNote = {
     ...existing.Item,
     title: body.title ?? existing.Item.title,
     content: body.content ?? existing.Item.content,
+    tags: tags !== undefined ? tags : (existing.Item.tags ?? []),
     updatedAt: new Date().toISOString(),
   };
 
