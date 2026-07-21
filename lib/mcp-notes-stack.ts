@@ -21,6 +21,7 @@ export class McpNotesStack extends cdk.Stack {
   public readonly userPool: cognito.UserPool;
   public readonly userPoolClient: cognito.UserPoolClient;
   public readonly notesTable: dynamodb.Table;
+  public readonly tagsTable: dynamodb.Table;
   public readonly api: apigateway.RestApi;
 
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -61,58 +62,118 @@ export class McpNotesStack extends cdk.Stack {
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
 
+    // ─── DynamoDB Tags Table ─────────────────────────────────────────────
+    this.tagsTable = new dynamodb.Table(this, 'McpNotesTagsTable', {
+      partitionKey: { name: 'userId', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'tagId', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    });
+
     // ─── Lambda Functions (Notes CRUD) ───────────────────────────────────
     const lambdaCode = lambda.Code.fromAsset(
       path.join(__dirname, '..', 'src', 'lambda'),
     );
 
-    const makeFn = (id: string, handler: string, description: string) =>
-      new lambda.Function(this, id, {
-        runtime: lambda.Runtime.NODEJS_20_X,
-        code: lambdaCode,
-        handler,
-        description,
-        environment: {
-          TABLE_NAME: this.notesTable.tableName,
-        },
-      });
+    const listNotesFn = new lambda.Function(this, 'ListNotesFn', {
+      runtime: lambda.Runtime.NODEJS_20_X,
+      code: lambdaCode,
+      handler: 'list-notes.handler',
+      description: 'List all notes for the authenticated user',
+      environment: {
+        TABLE_NAME: this.notesTable.tableName,
+      },
+    });
 
-    const listNotesFn = makeFn(
-      'ListNotesFn',
-      'list-notes.handler',
-      'List all notes for the authenticated user',
-    );
+    const createNoteFn = new lambda.Function(this, 'CreateNoteFn', {
+      runtime: lambda.Runtime.NODEJS_20_X,
+      code: lambdaCode,
+      handler: 'create-note.handler',
+      description: 'Create a new note',
+      environment: {
+        TABLE_NAME: this.notesTable.tableName,
+        TAGS_TABLE_NAME: this.tagsTable.tableName,
+      },
+    });
 
-    const createNoteFn = makeFn(
-      'CreateNoteFn',
-      'create-note.handler',
-      'Create a new note',
-    );
+    const getNoteFn = new lambda.Function(this, 'GetNoteFn', {
+      runtime: lambda.Runtime.NODEJS_20_X,
+      code: lambdaCode,
+      handler: 'get-note.handler',
+      description: 'Get a specific note by ID',
+      environment: {
+        TABLE_NAME: this.notesTable.tableName,
+      },
+    });
 
-    const getNoteFn = makeFn(
-      'GetNoteFn',
-      'get-note.handler',
-      'Get a specific note by ID',
-    );
+    const updateNoteFn = new lambda.Function(this, 'UpdateNoteFn', {
+      runtime: lambda.Runtime.NODEJS_20_X,
+      code: lambdaCode,
+      handler: 'update-note.handler',
+      description: 'Update an existing note',
+      environment: {
+        TABLE_NAME: this.notesTable.tableName,
+        TAGS_TABLE_NAME: this.tagsTable.tableName,
+      },
+    });
 
-    const updateNoteFn = makeFn(
-      'UpdateNoteFn',
-      'update-note.handler',
-      'Update an existing note',
-    );
+    const deleteNoteFn = new lambda.Function(this, 'DeleteNoteFn', {
+      runtime: lambda.Runtime.NODEJS_20_X,
+      code: lambdaCode,
+      handler: 'delete-note.handler',
+      description: 'Delete a note',
+      environment: {
+        TABLE_NAME: this.notesTable.tableName,
+      },
+    });
 
-    const deleteNoteFn = makeFn(
-      'DeleteNoteFn',
-      'delete-note.handler',
-      'Delete a note',
-    );
+    // ─── Lambda Functions (Tags CRUD) ────────────────────────────────────
+    const listTagsFn = new lambda.Function(this, 'ListTagsFn', {
+      runtime: lambda.Runtime.NODEJS_20_X,
+      code: lambdaCode,
+      handler: 'list-tags.handler',
+      description: 'List all tags for the authenticated user',
+      environment: {
+        TAGS_TABLE_NAME: this.tagsTable.tableName,
+      },
+    });
 
-    // Grant DynamoDB permissions
-    this.notesTable.grantReadWriteData(listNotesFn);
+    const createTagFn = new lambda.Function(this, 'CreateTagFn', {
+      runtime: lambda.Runtime.NODEJS_20_X,
+      code: lambdaCode,
+      handler: 'create-tag.handler',
+      description: 'Create a new tag',
+      environment: {
+        TAGS_TABLE_NAME: this.tagsTable.tableName,
+      },
+    });
+
+    const deleteTagFn = new lambda.Function(this, 'DeleteTagFn', {
+      runtime: lambda.Runtime.NODEJS_20_X,
+      code: lambdaCode,
+      handler: 'delete-tag.handler',
+      description: 'Delete a tag and remove it from all notes',
+      environment: {
+        TAGS_TABLE_NAME: this.tagsTable.tableName,
+        TABLE_NAME: this.notesTable.tableName,
+      },
+    });
+
+    // ─── DynamoDB Permissions ────────────────────────────────────────────
+    // Notes table
+    this.notesTable.grantReadData(listNotesFn);
     this.notesTable.grantReadWriteData(createNoteFn);
-    this.notesTable.grantReadWriteData(getNoteFn);
+    this.notesTable.grantReadData(getNoteFn);
     this.notesTable.grantReadWriteData(updateNoteFn);
     this.notesTable.grantReadWriteData(deleteNoteFn);
+    this.notesTable.grantReadWriteData(deleteTagFn);
+
+    // Tags table
+    this.tagsTable.grantReadData(listTagsFn);
+    this.tagsTable.grantReadWriteData(createTagFn);
+    this.tagsTable.grantReadWriteData(deleteTagFn);
+    this.tagsTable.grantReadData(createNoteFn);
+    this.tagsTable.grantReadData(updateNoteFn);
 
     // ─── API Gateway ─────────────────────────────────────────────────────
     this.api = new apigateway.RestApi(this, 'McpNotesApi', {
@@ -161,6 +222,27 @@ export class McpNotesStack extends cdk.Stack {
     singleNote.addMethod(
       'DELETE',
       new apigateway.LambdaIntegration(deleteNoteFn),
+      authorizationOptions,
+    );
+
+    // /tags
+    const tags = this.api.root.addResource('tags');
+    tags.addMethod(
+      'GET',
+      new apigateway.LambdaIntegration(listTagsFn),
+      authorizationOptions,
+    );
+    tags.addMethod(
+      'POST',
+      new apigateway.LambdaIntegration(createTagFn),
+      authorizationOptions,
+    );
+
+    // /tags/{tagId}
+    const singleTag = tags.addResource('{tagId}');
+    singleTag.addMethod(
+      'DELETE',
+      new apigateway.LambdaIntegration(deleteTagFn),
       authorizationOptions,
     );
 
@@ -328,6 +410,10 @@ function handler(event) {
 
     new cdk.CfnOutput(this, 'NotesTableName', {
       value: this.notesTable.tableName,
+    });
+
+    new cdk.CfnOutput(this, 'TagsTableName', {
+      value: this.tagsTable.tableName,
     });
 
     new cdk.CfnOutput(this, 'ApiUrl', {
