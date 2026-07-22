@@ -76,7 +76,7 @@ export class McpNotesStack extends cdk.Stack {
     );
 
     const listNotesFn = new lambda.Function(this, 'ListNotesFn', {
-      runtime: lambda.Runtime.NODEJS_20_X,
+      runtime: lambda.Runtime.NODEJS_22_X,
       code: lambdaCode,
       handler: 'list-notes.handler',
       description: 'List all notes for the authenticated user',
@@ -86,7 +86,7 @@ export class McpNotesStack extends cdk.Stack {
     });
 
     const createNoteFn = new lambda.Function(this, 'CreateNoteFn', {
-      runtime: lambda.Runtime.NODEJS_20_X,
+      runtime: lambda.Runtime.NODEJS_22_X,
       code: lambdaCode,
       handler: 'create-note.handler',
       description: 'Create a new note',
@@ -97,7 +97,7 @@ export class McpNotesStack extends cdk.Stack {
     });
 
     const getNoteFn = new lambda.Function(this, 'GetNoteFn', {
-      runtime: lambda.Runtime.NODEJS_20_X,
+      runtime: lambda.Runtime.NODEJS_22_X,
       code: lambdaCode,
       handler: 'get-note.handler',
       description: 'Get a specific note by ID',
@@ -107,7 +107,7 @@ export class McpNotesStack extends cdk.Stack {
     });
 
     const updateNoteFn = new lambda.Function(this, 'UpdateNoteFn', {
-      runtime: lambda.Runtime.NODEJS_20_X,
+      runtime: lambda.Runtime.NODEJS_22_X,
       code: lambdaCode,
       handler: 'update-note.handler',
       description: 'Update an existing note',
@@ -118,7 +118,7 @@ export class McpNotesStack extends cdk.Stack {
     });
 
     const deleteNoteFn = new lambda.Function(this, 'DeleteNoteFn', {
-      runtime: lambda.Runtime.NODEJS_20_X,
+      runtime: lambda.Runtime.NODEJS_22_X,
       code: lambdaCode,
       handler: 'delete-note.handler',
       description: 'Delete a note',
@@ -129,7 +129,7 @@ export class McpNotesStack extends cdk.Stack {
 
     // ─── Lambda Functions (Tags CRUD) ────────────────────────────────────
     const listTagsFn = new lambda.Function(this, 'ListTagsFn', {
-      runtime: lambda.Runtime.NODEJS_20_X,
+      runtime: lambda.Runtime.NODEJS_22_X,
       code: lambdaCode,
       handler: 'list-tags.handler',
       description: 'List all tags for the authenticated user',
@@ -139,7 +139,7 @@ export class McpNotesStack extends cdk.Stack {
     });
 
     const createTagFn = new lambda.Function(this, 'CreateTagFn', {
-      runtime: lambda.Runtime.NODEJS_20_X,
+      runtime: lambda.Runtime.NODEJS_22_X,
       code: lambdaCode,
       handler: 'create-tag.handler',
       description: 'Create a new tag',
@@ -149,7 +149,7 @@ export class McpNotesStack extends cdk.Stack {
     });
 
     const deleteTagFn = new lambda.Function(this, 'DeleteTagFn', {
-      runtime: lambda.Runtime.NODEJS_20_X,
+      runtime: lambda.Runtime.NODEJS_22_X,
       code: lambdaCode,
       handler: 'delete-tag.handler',
       description: 'Delete a tag and remove it from all notes',
