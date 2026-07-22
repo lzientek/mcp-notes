@@ -2,6 +2,7 @@ import * as cdk from 'aws-cdk-lib';
 import * as cognito from 'aws-cdk-lib/aws-cognito';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
+import { NodejsFunction } from 'aws-cdk-lib/aws-lambda-nodejs';
 import * as apigateway from 'aws-cdk-lib/aws-apigateway';
 import * as acm from 'aws-cdk-lib/aws-certificatemanager';
 import * as route53 from 'aws-cdk-lib/aws-route53';
@@ -71,24 +72,22 @@ export class McpNotesStack extends cdk.Stack {
     });
 
     // ─── Lambda Functions (Notes CRUD) ───────────────────────────────────
-    const lambdaCode = lambda.Code.fromAsset(
-      path.join(__dirname, '..', 'src', 'lambda'),
-    );
+    const lambdaDir = path.join(__dirname, '..', 'src', 'lambda');
 
-    const listNotesFn = new lambda.Function(this, 'ListNotesFn', {
+    const listNotesFn = new NodejsFunction(this, 'ListNotesFn', {
       runtime: lambda.Runtime.NODEJS_22_X,
-      code: lambdaCode,
-      handler: 'list-notes.handler',
+      entry: path.join(lambdaDir, 'list-notes.ts'),
+      handler: 'handler',
       description: 'List all notes for the authenticated user',
       environment: {
         TABLE_NAME: this.notesTable.tableName,
       },
     });
 
-    const createNoteFn = new lambda.Function(this, 'CreateNoteFn', {
+    const createNoteFn = new NodejsFunction(this, 'CreateNoteFn', {
       runtime: lambda.Runtime.NODEJS_22_X,
-      code: lambdaCode,
-      handler: 'create-note.handler',
+      entry: path.join(lambdaDir, 'create-note.ts'),
+      handler: 'handler',
       description: 'Create a new note',
       environment: {
         TABLE_NAME: this.notesTable.tableName,
@@ -96,20 +95,20 @@ export class McpNotesStack extends cdk.Stack {
       },
     });
 
-    const getNoteFn = new lambda.Function(this, 'GetNoteFn', {
+    const getNoteFn = new NodejsFunction(this, 'GetNoteFn', {
       runtime: lambda.Runtime.NODEJS_22_X,
-      code: lambdaCode,
-      handler: 'get-note.handler',
+      entry: path.join(lambdaDir, 'get-note.ts'),
+      handler: 'handler',
       description: 'Get a specific note by ID',
       environment: {
         TABLE_NAME: this.notesTable.tableName,
       },
     });
 
-    const updateNoteFn = new lambda.Function(this, 'UpdateNoteFn', {
+    const updateNoteFn = new NodejsFunction(this, 'UpdateNoteFn', {
       runtime: lambda.Runtime.NODEJS_22_X,
-      code: lambdaCode,
-      handler: 'update-note.handler',
+      entry: path.join(lambdaDir, 'update-note.ts'),
+      handler: 'handler',
       description: 'Update an existing note',
       environment: {
         TABLE_NAME: this.notesTable.tableName,
@@ -117,10 +116,10 @@ export class McpNotesStack extends cdk.Stack {
       },
     });
 
-    const deleteNoteFn = new lambda.Function(this, 'DeleteNoteFn', {
+    const deleteNoteFn = new NodejsFunction(this, 'DeleteNoteFn', {
       runtime: lambda.Runtime.NODEJS_22_X,
-      code: lambdaCode,
-      handler: 'delete-note.handler',
+      entry: path.join(lambdaDir, 'delete-note.ts'),
+      handler: 'handler',
       description: 'Delete a note',
       environment: {
         TABLE_NAME: this.notesTable.tableName,
@@ -128,30 +127,30 @@ export class McpNotesStack extends cdk.Stack {
     });
 
     // ─── Lambda Functions (Tags CRUD) ────────────────────────────────────
-    const listTagsFn = new lambda.Function(this, 'ListTagsFn', {
+    const listTagsFn = new NodejsFunction(this, 'ListTagsFn', {
       runtime: lambda.Runtime.NODEJS_22_X,
-      code: lambdaCode,
-      handler: 'list-tags.handler',
+      entry: path.join(lambdaDir, 'list-tags.ts'),
+      handler: 'handler',
       description: 'List all tags for the authenticated user',
       environment: {
         TAGS_TABLE_NAME: this.tagsTable.tableName,
       },
     });
 
-    const createTagFn = new lambda.Function(this, 'CreateTagFn', {
+    const createTagFn = new NodejsFunction(this, 'CreateTagFn', {
       runtime: lambda.Runtime.NODEJS_22_X,
-      code: lambdaCode,
-      handler: 'create-tag.handler',
+      entry: path.join(lambdaDir, 'create-tag.ts'),
+      handler: 'handler',
       description: 'Create a new tag',
       environment: {
         TAGS_TABLE_NAME: this.tagsTable.tableName,
       },
     });
 
-    const deleteTagFn = new lambda.Function(this, 'DeleteTagFn', {
+    const deleteTagFn = new NodejsFunction(this, 'DeleteTagFn', {
       runtime: lambda.Runtime.NODEJS_22_X,
-      code: lambdaCode,
-      handler: 'delete-tag.handler',
+      entry: path.join(lambdaDir, 'delete-tag.ts'),
+      handler: 'handler',
       description: 'Delete a tag and remove it from all notes',
       environment: {
         TAGS_TABLE_NAME: this.tagsTable.tableName,
