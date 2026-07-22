@@ -21,7 +21,7 @@ export function clearSession(): void {
 }
 
 export function redirectToLogin(): void {
-  window.location.href = '/?action=login';
+  window.location.href = '/login';
 }
 
 export function isAuthenticated(): boolean {

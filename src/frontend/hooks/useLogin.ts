@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
 import * as authService from '../services/auth-service.js';
+import { saveTokens } from '../services/api-client.js';
 
 export interface UseLoginReturn {
   login: (email: string, password: string, port: number) => Promise<void>;
@@ -22,6 +23,8 @@ export function useLogin(onSuccess: () => void): UseLoginReturn {
         const tokens = await authService.login(email, password);
         if (port > 0) {
           await authService.deliverTokensToLocalServer(tokens, port);
+        } else {
+          saveTokens(tokens.idToken, tokens.refreshToken);
         }
         onSuccess();
       } catch (err: unknown) {
