@@ -10,6 +10,7 @@ interface LoginFormProps {
 }
 
 export function LoginForm({ callbackPort, onSuccess }: LoginFormProps) {
+  const isMcpFlow = callbackPort > 0;
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fieldErrors, setFieldErrors] = useState<{ email: string | null; password: string | null }>({
@@ -38,10 +39,12 @@ export function LoginForm({ callbackPort, onSuccess }: LoginFormProps) {
 
   return (
     <form onSubmit={handleSubmit} noValidate>
-      <h1>Connexion MCP Notes</h1>
-      <p className="mcp-context">
-        Cette connexion authentifiera votre serveur MCP local (Claude Desktop).
-      </p>
+      <h1>{isMcpFlow ? 'Connexion MCP' : 'Connexion'}</h1>
+      {isMcpFlow && (
+        <p className="mcp-context">
+          Cette connexion authentifiera votre serveur MCP local (Claude Desktop).
+        </p>
+      )}
 
       <ErrorAlert message={loginHook.error} />
 
