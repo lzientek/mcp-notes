@@ -196,3 +196,26 @@ button[type='submit']:disabled {
   height: 48px;
   width: auto;
 }
+
+
+.auth-switch {
+  margin-top: 1.5rem;
+  text-align: center;
+  font-size: 0.875rem;
+  color: var(--color-text-light);
+}
+
+.auth-switch .link-btn {
+  background: none;
+  border: none;
+  color: var(--color-primary);
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+}
+
+.auth-switch .link-btn:hover {
+  color: var(--color-primary-hover);
+}
