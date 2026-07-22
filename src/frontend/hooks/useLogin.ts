@@ -20,7 +20,9 @@ export function useLogin(onSuccess: () => void): UseLoginReturn {
       setError(null);
       try {
         const tokens = await authService.login(email, password);
-        await authService.deliverTokensToLocalServer(tokens, port);
+        if (port > 0) {
+          await authService.deliverTokensToLocalServer(tokens, port);
+        }
         onSuccess();
       } catch (err: unknown) {
         const message = mapLoginError(err);

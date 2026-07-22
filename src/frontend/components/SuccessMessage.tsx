@@ -8,7 +8,7 @@ export function SuccessMessage() {
       setCountdown((prev) => {
         if (prev <= 1) {
           clearInterval(interval);
-          window.location.href = '/';
+          window.location.href = '/login';
           return 0;
         }
         return prev - 1;
@@ -23,7 +23,7 @@ export function SuccessMessage() {
       <h1>Compte activé avec succès !</h1>
       <p>Redirection dans {countdown} seconde{countdown > 1 ? 's' : ''}...</p>
       <p>
-        <a href="/">Aller à la page de connexion</a>
+        <a href="/login">Aller à la page de connexion</a>
       </p>
     </div>
   );
