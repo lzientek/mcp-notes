@@ -1,5 +1,5 @@
 {
-  "app": "npx ts-node --prefer-ts-exts bin/mcp-notes.ts",
+  "app": "npx tsx bin/mcp-notes.ts",
   "watch": {
     "include": ["**"],
     "exclude": [

@@ -25,6 +25,13 @@
   "exclude": [
     "node_modules",
     "dist",
-    "cdk.out"
+    "cdk.out",
+    "src/frontend",
+    "tests/unit/frontend",
+    "tests/unit/mcp-server",
+    "tests/unit/storage",
+    "tests/unit/validators",
+    "tests/unit/errors",
+    "tests/integration"
   ]
 }
