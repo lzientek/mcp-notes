@@ -1,4 +1,5 @@
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
+import { CORS_HEADERS } from './helpers/cors.js';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, QueryCommand, PutCommand } from '@aws-sdk/lib-dynamodb';
 import { ulid } from 'ulid';
@@ -13,6 +14,7 @@ export const handler = async (
   if (!userId) {
     return {
       statusCode: 401,
+      headers: { ...CORS_HEADERS },
       body: JSON.stringify({
         code: 'AUTH_REQUIRED',
         message: 'Authentication is required.',
@@ -27,6 +29,7 @@ export const handler = async (
   } catch {
     return {
       statusCode: 400,
+      headers: { ...CORS_HEADERS },
       body: JSON.stringify({
         code: 'INVALID_REQUEST',
         message: 'Request body must be valid JSON.',
@@ -39,6 +42,7 @@ export const handler = async (
   if (!rawName || rawName.length === 0 || rawName.length > 50) {
     return {
       statusCode: 400,
+      headers: { ...CORS_HEADERS },
       body: JSON.stringify({
         code: 'INVALID_REQUEST',
         message: 'Tag name is required and must be between 1 and 50 characters.',
@@ -65,6 +69,7 @@ export const handler = async (
   if (duplicate) {
     return {
       statusCode: 409,
+      headers: { ...CORS_HEADERS },
       body: JSON.stringify({
         code: 'TAG_EXISTS',
         message: `A tag named "${name}" already exists.`,
@@ -87,7 +92,7 @@ export const handler = async (
 
   return {
     statusCode: 201,
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
     body: JSON.stringify({ tagId, name, createdAt: now }),
   };
 };

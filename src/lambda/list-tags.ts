@@ -1,4 +1,5 @@
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
+import { CORS_HEADERS } from './helpers/cors.js';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, QueryCommand } from '@aws-sdk/lib-dynamodb';
 
@@ -12,6 +13,7 @@ export const handler = async (
   if (!userId) {
     return {
       statusCode: 401,
+      headers: { ...CORS_HEADERS },
       body: JSON.stringify({
         code: 'AUTH_REQUIRED',
         message: 'Authentication is required.',
@@ -34,7 +36,7 @@ export const handler = async (
 
   return {
     statusCode: 200,
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
     body: JSON.stringify({ tags }),
   };
 };

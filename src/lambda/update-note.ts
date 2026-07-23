@@ -1,4 +1,5 @@
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
+import { CORS_HEADERS } from './helpers/cors.js';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, PutCommand, GetCommand } from '@aws-sdk/lib-dynamodb';
 import { validateTags } from './helpers/validate-tags.js';
@@ -14,6 +15,7 @@ export const handler = async (
   if (!userId) {
     return {
       statusCode: 401,
+      headers: { ...CORS_HEADERS },
       body: JSON.stringify({
         code: 'AUTH_REQUIRED',
         message: 'Authentication is required.',
@@ -26,6 +28,7 @@ export const handler = async (
   if (!noteId) {
     return {
       statusCode: 400,
+      headers: { ...CORS_HEADERS },
       body: JSON.stringify({
         code: 'INVALID_REQUEST',
         message: 'Note ID is required.',
@@ -40,6 +43,7 @@ export const handler = async (
   } catch {
     return {
       statusCode: 400,
+      headers: { ...CORS_HEADERS },
       body: JSON.stringify({
         code: 'INVALID_REQUEST',
         message: 'Request body must be valid JSON.',
@@ -59,6 +63,7 @@ export const handler = async (
   if (!existing.Item) {
     return {
       statusCode: 404,
+      headers: { ...CORS_HEADERS },
       body: JSON.stringify({
         code: 'NOTE_NOT_FOUND',
         message: 'The requested note was not found.',
@@ -75,8 +80,9 @@ export const handler = async (
       const validation = await validateTags(client, TAGS_TABLE_NAME, userId, tags);
       if (!validation.valid) {
         return {
-          statusCode: 400,
-          body: JSON.stringify({
+      statusCode: 400,
+      headers: { ...CORS_HEADERS },
+      body: JSON.stringify({
             code: 'INVALID_TAGS',
             message: 'Some tags do not exist.',
             invalidTags: validation.invalidTags,
@@ -105,7 +111,7 @@ export const handler = async (
 
   return {
     statusCode: 200,
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
     body: JSON.stringify(updatedNote),
   };
 };

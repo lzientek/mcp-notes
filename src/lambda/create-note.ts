@@ -1,4 +1,5 @@
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
+import { CORS_HEADERS } from './helpers/cors.js';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, PutCommand } from '@aws-sdk/lib-dynamodb';
 import { ulid } from 'ulid';
@@ -15,6 +16,7 @@ export const handler = async (
   if (!userId) {
     return {
       statusCode: 401,
+      headers: { ...CORS_HEADERS },
       body: JSON.stringify({
         code: 'AUTH_REQUIRED',
         message: 'Authentication is required.',
@@ -29,6 +31,7 @@ export const handler = async (
   } catch {
     return {
       statusCode: 400,
+      headers: { ...CORS_HEADERS },
       body: JSON.stringify({
         code: 'INVALID_REQUEST',
         message: 'Request body must be valid JSON.',
@@ -46,8 +49,9 @@ export const handler = async (
     const validation = await validateTags(client, TAGS_TABLE_NAME, userId, tags);
     if (!validation.valid) {
       return {
-        statusCode: 400,
-        body: JSON.stringify({
+      statusCode: 400,
+      headers: { ...CORS_HEADERS },
+      body: JSON.stringify({
           code: 'INVALID_TAGS',
           message: 'Some tags do not exist.',
           invalidTags: validation.invalidTags,
@@ -78,7 +82,7 @@ export const handler = async (
 
   return {
     statusCode: 201,
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
     body: JSON.stringify(note),
   };
 };

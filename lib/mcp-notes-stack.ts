@@ -182,7 +182,6 @@ export class McpNotesStack extends cdk.Stack {
         allowOrigins: ['https://www.notlai.com', 'https://notlai.com'],
         allowMethods: apigateway.Cors.ALL_METHODS,
         allowHeaders: ['Content-Type', 'Authorization'],
-        allowCredentials: true,
       },
     });
 

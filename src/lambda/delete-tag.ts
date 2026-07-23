@@ -1,4 +1,5 @@
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
+import { CORS_HEADERS } from './helpers/cors.js';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import {
   DynamoDBDocumentClient,
@@ -19,6 +20,7 @@ export const handler = async (
   if (!userId) {
     return {
       statusCode: 401,
+      headers: { ...CORS_HEADERS },
       body: JSON.stringify({
         code: 'AUTH_REQUIRED',
         message: 'Authentication is required.',
@@ -31,6 +33,7 @@ export const handler = async (
   if (!tagId) {
     return {
       statusCode: 400,
+      headers: { ...CORS_HEADERS },
       body: JSON.stringify({
         code: 'INVALID_REQUEST',
         message: 'Tag ID is required.',
@@ -50,6 +53,7 @@ export const handler = async (
   if (!tagResult.Item) {
     return {
       statusCode: 404,
+      headers: { ...CORS_HEADERS },
       body: JSON.stringify({
         code: 'TAG_NOT_FOUND',
         message: 'The requested tag was not found.',
@@ -100,7 +104,8 @@ export const handler = async (
   );
 
   return {
-    statusCode: 204,
-    body: '',
+      statusCode: 204,
+      headers: { ...CORS_HEADERS },
+      body: '',
   };
 };
