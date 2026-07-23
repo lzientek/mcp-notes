@@ -376,6 +376,49 @@
   margin-bottom: 0.3rem;
 }
 
+.markdown-body ul.contains-task-list {
+  list-style: none;
+  padding-left: 0.25rem;
+}
+
+.markdown-body li.task-list-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+}
+
+.markdown-body li.task-list-item input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 1.1rem;
+  height: 1.1rem;
+  min-width: 1.1rem;
+  border: 2px solid #d1d5db;
+  border-radius: 4px;
+  margin-top: 0.15rem;
+  cursor: default;
+  position: relative;
+  background: white;
+}
+
+.markdown-body li.task-list-item input[type="checkbox"]:checked {
+  background: #6366f1;
+  border-color: #6366f1;
+}
+
+.markdown-body li.task-list-item input[type="checkbox"]:checked::after {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 0px;
+  width: 5px;
+  height: 9px;
+  border: solid white;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
 .markdown-body code {
   background: #f3f4f6;
   border-radius: 4px;
