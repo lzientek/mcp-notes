@@ -178,6 +178,12 @@ export class McpNotesStack extends cdk.Stack {
     this.api = new apigateway.RestApi(this, 'McpNotesApi', {
       restApiName: 'mcp-notes-api',
       deployOptions: { stageName: 'prod' },
+      defaultCorsPreflightOptions: {
+        allowOrigins: ['https://www.notlai.com', 'https://notlai.com'],
+        allowMethods: apigateway.Cors.ALL_METHODS,
+        allowHeaders: ['Content-Type', 'Authorization'],
+        allowCredentials: true,
+      },
     });
 
     const authorizer = new apigateway.CognitoUserPoolsAuthorizer(
@@ -192,6 +198,34 @@ export class McpNotesStack extends cdk.Stack {
       authorizer,
       authorizationType: apigateway.AuthorizationType.COGNITO,
     };
+
+    // CORS headers on 4xx gateway responses (authorizer rejections)
+    this.api.addGatewayResponse('CorsUnauthorized', {
+      type: apigateway.ResponseType.UNAUTHORIZED,
+      responseHeaders: {
+        'Access-Control-Allow-Origin': "'https://www.notlai.com'",
+        'Access-Control-Allow-Headers': "'Content-Type,Authorization'",
+        'Access-Control-Allow-Methods': "'GET,POST,PUT,DELETE,OPTIONS'",
+      },
+    });
+
+    this.api.addGatewayResponse('CorsAccessDenied', {
+      type: apigateway.ResponseType.ACCESS_DENIED,
+      responseHeaders: {
+        'Access-Control-Allow-Origin': "'https://www.notlai.com'",
+        'Access-Control-Allow-Headers': "'Content-Type,Authorization'",
+        'Access-Control-Allow-Methods': "'GET,POST,PUT,DELETE,OPTIONS'",
+      },
+    });
+
+    this.api.addGatewayResponse('CorsDefault4xx', {
+      type: apigateway.ResponseType.DEFAULT_4XX,
+      responseHeaders: {
+        'Access-Control-Allow-Origin': "'https://www.notlai.com'",
+        'Access-Control-Allow-Headers': "'Content-Type,Authorization'",
+        'Access-Control-Allow-Methods': "'GET,POST,PUT,DELETE,OPTIONS'",
+      },
+    });
 
     // /notes
     const notes = this.api.root.addResource('notes');
