@@ -111,6 +111,16 @@ button[type='submit']:disabled {
   cursor: not-allowed;
 }
 
+.search-bar button[type='submit'] {
+  width: auto;
+  margin-top: 0;
+  padding: 0.6rem 0.8rem;
+  background: #f9fafb;
+  color: inherit;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
 .field-error {
   display: block;
   color: var(--color-error);
