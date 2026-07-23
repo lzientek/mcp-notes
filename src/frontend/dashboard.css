@@ -1,22 +1,23 @@
 /* ─── Dashboard ─────────────────────────────────────────────────── */
 .dashboard {
-  max-width: 1000px;
-  margin: 0 auto;
-  padding: 2rem 1.5rem;
   min-height: 100vh;
+  background: #fafbfc;
 }
 
 .dashboard-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 2rem;
-  padding-bottom: 1.5rem;
-  border-bottom: 1px solid #f0f0f0;
+  padding: 1rem 2rem;
+  background: white;
+  border-bottom: 1px solid #eee;
+  position: sticky;
+  top: 0;
+  z-index: 10;
 }
 
 .dashboard-header .logo {
-  height: 36px;
+  height: 32px;
 }
 
 .logout-btn {
@@ -40,12 +41,10 @@
 .dashboard-filters {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
-  margin-bottom: 2rem;
-  padding: 1.25rem;
-  background: #fafafa;
-  border-radius: 12px;
-  border: 1px solid #f0f0f0;
+  gap: 0.75rem;
+  padding: 1.25rem 2rem;
+  background: white;
+  border-bottom: 1px solid #eee;
 }
 
 .search-bar {
@@ -59,18 +58,19 @@
   border: 1px solid #e5e7eb;
   border-radius: 8px;
   font-size: 0.9rem;
-  background: white;
+  background: #f9fafb;
   transition: all 0.2s;
 }
 
 .search-bar input:focus {
   outline: none;
   border-color: #6366f1;
+  background: white;
   box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.08);
 }
 
 .search-bar button {
-  background: white;
+  background: #f9fafb;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
   padding: 0.6rem 0.8rem;
@@ -191,6 +191,12 @@
 }
 
 /* ─── Notes Grid ────────────────────────────────────────────────── */
+.dashboard-content {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 2rem;
+}
+
 .notes-list {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
@@ -386,8 +392,8 @@
 
 /* ─── Responsive ────────────────────────────────────────────────── */
 @media (max-width: 640px) {
-  .dashboard {
-    padding: 1rem;
+  .dashboard-header {
+    padding: 0.75rem 1rem;
   }
 
   .dashboard-header .logo {
@@ -395,6 +401,10 @@
   }
 
   .dashboard-filters {
+    padding: 1rem;
+  }
+
+  .dashboard-content {
     padding: 1rem;
   }
 
