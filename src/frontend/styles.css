@@ -32,7 +32,8 @@ body {
 }
 
 .container:has(.dashboard),
-.container:has(.note-detail) {
+.container:has(.note-detail),
+.container:has(.landing) {
   display: block;
   padding: 0;
   align-items: stretch;
