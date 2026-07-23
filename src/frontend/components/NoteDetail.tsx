@@ -1,6 +1,13 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
+import { marked } from 'marked';
 import { fetchNote } from '../services/notes-service.js';
 import type { Note } from '../types.js';
+
+// Configure marked for safe rendering (no raw HTML)
+marked.setOptions({
+  breaks: true,
+  gfm: true,
+});
 
 interface NoteDetailProps {
   noteId: string;
@@ -77,11 +84,10 @@ export function NoteDetail({ noteId, onBack }: NoteDetailProps) {
           <span>Créé le {new Date(note.createdAt).toLocaleDateString('fr-FR')}</span>
           <span>Modifié le {new Date(note.updatedAt).toLocaleDateString('fr-FR')}</span>
         </div>
-        <div className="note-detail-content">
-          {note.content.split('\n').map((line, i) => (
-            <p key={i}>{line || '\u00A0'}</p>
-          ))}
-        </div>
+        <div
+          className="note-detail-content markdown-body"
+          dangerouslySetInnerHTML={{ __html: marked.parse(note.content) as string }}
+        />
       </article>
     </div>
   );

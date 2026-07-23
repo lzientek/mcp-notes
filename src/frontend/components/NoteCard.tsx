@@ -5,6 +5,26 @@ interface NoteCardProps {
   onSelect: (noteId: string) => void;
 }
 
+function stripMarkdown(text: string): string {
+  return text
+    .replace(/#{1,6}\s+/g, '')          // headings
+    .replace(/\*\*(.+?)\*\*/g, '$1')    // bold
+    .replace(/\*(.+?)\*/g, '$1')        // italic
+    .replace(/__(.+?)__/g, '$1')        // bold alt
+    .replace(/_(.+?)_/g, '$1')          // italic alt
+    .replace(/~~(.+?)~~/g, '$1')        // strikethrough
+    .replace(/`{1,3}[^`]*`{1,3}/g, '')  // inline/block code
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // links
+    .replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1') // images
+    .replace(/^\s*[-*+]\s+/gm, '')      // unordered list markers
+    .replace(/^\s*\d+\.\s+/gm, '')      // ordered list markers
+    .replace(/^\s*>\s+/gm, '')          // blockquotes
+    .replace(/---+/g, '')               // horizontal rules
+    .replace(/\n{2,}/g, ' ')            // collapse multiple newlines
+    .replace(/\n/g, ' ')                // remaining newlines
+    .trim();
+}
+
 function formatRelativeDate(dateStr: string): string {
   const date = new Date(dateStr);
   const now = new Date();
@@ -21,10 +41,8 @@ function formatRelativeDate(dateStr: string): string {
 }
 
 export function NoteCard({ note, onSelect }: NoteCardProps) {
-  const excerpt =
-    note.content.length > 120
-      ? `${note.content.slice(0, 120)}…`
-      : note.content;
+  const plain = stripMarkdown(note.content);
+  const excerpt = plain.length > 120 ? `${plain.slice(0, 120)}…` : plain;
 
   return (
     <article
