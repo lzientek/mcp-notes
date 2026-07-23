@@ -24,10 +24,6 @@ cpSync(
   join(root, 'src/frontend/index.html'),
   join(root, 'dist/frontend/index.html'),
 );
-cpSync(
-  join(root, 'src/frontend/styles.css'),
-  join(root, 'dist/frontend/styles.css'),
-);
 
 // Copy static assets (logos)
 cpSync(
