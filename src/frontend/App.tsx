@@ -76,7 +76,7 @@ export function App() {
     <div className="app-wrapper">
       {(step === 'signup' || step === 'confirm' || step === 'success' || step === 'login' || step === 'login-success' || step === 'login-error') && (
         <div className="app-logo">
-          <img src="./static/notlai_logo_text_right.png" alt="Notlai" className="logo" />
+          <img src="/static/notlai_logo_text_right.png" alt="Notlai" className="logo" />
         </div>
       )}
 

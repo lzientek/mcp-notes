@@ -36,7 +36,7 @@ export function SignupPage() {
   return (
     <div className="app-wrapper">
       <div className="app-logo">
-        <img src="./static/notlai_logo_text_right.png" alt="Notlai" className="logo" />
+        <img src="/static/notlai_logo_text_right.png" alt="Notlai" className="logo" />
       </div>
 
       {step === 'signup' && (
