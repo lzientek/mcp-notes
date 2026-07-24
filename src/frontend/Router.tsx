@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { SignupPage } from './pages/SignupPage.js';
 import { LoginPage } from './pages/LoginPage.js';
+import { SetupPage } from './pages/SetupPage.js';
 import { DashboardPage } from './pages/DashboardPage.js';
 import { NoteDetailPage } from './pages/NoteDetailPage.js';
 import { isAuthenticated } from './services/api-client.js';
@@ -50,6 +51,10 @@ export function AppRouter() {
         <Route
           path="/login"
           element={<LoginPage />}
+        />
+        <Route
+          path="/setup"
+          element={<SetupPage />}
         />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
