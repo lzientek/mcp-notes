@@ -6,53 +6,17 @@ type LLMChoice = 'claude-ext' | 'claude' | 'kiro' | 'cursor' | 'windsurf' | 'oth
 interface LLMOption {
   id: LLMChoice;
   name: string;
-  icon: React.ReactNode;
+  icon: string;
   description: string;
 }
 
-// SVG icons for each LLM
-const ClaudeIcon = () => (
-  <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-    <path d="M16.5 3.5C13.5 2 10 2.5 7.5 4.5C5 6.5 3.5 9.5 4 13C4.5 16.5 7 19.5 10.5 20.5C14 21.5 17.5 20 19.5 17C21.5 14 21.5 10 19.5 7C18.5 5.5 17.5 4.5 16.5 3.5Z" fill="#D97706"/>
-    <path d="M14.5 8L10 16M10 8L14.5 16" stroke="white" strokeWidth="1.5" strokeLinecap="round"/>
-  </svg>
-);
-
-const KiroIcon = () => (
-  <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-    <rect x="3" y="3" width="18" height="18" rx="4" fill="#FF9900"/>
-    <path d="M8 8L12 12L8 16M13 16H17" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-  </svg>
-);
-
-const CursorIcon = () => (
-  <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-    <rect x="2" y="2" width="20" height="20" rx="5" fill="#1f1f1f"/>
-    <path d="M8 7V17L12 14L14 17.5L16 16.5L14 13L18 12L8 7Z" fill="white"/>
-  </svg>
-);
-
-const WindsurfIcon = () => (
-  <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-    <rect x="2" y="2" width="20" height="20" rx="5" fill="#00C7B7"/>
-    <path d="M7 16C9 14 11 13 14 13C16 13 18 14 19 15M6 12C8.5 9.5 11 9 14 9.5C16.5 10 18.5 11 20 12.5" stroke="white" strokeWidth="1.8" strokeLinecap="round"/>
-  </svg>
-);
-
-const PlugIcon = () => (
-  <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-    <rect x="2" y="2" width="20" height="20" rx="5" fill="#6366f1"/>
-    <path d="M9 5V8M15 5V8M7 10H17M7 10V14C7 16.8 9.2 19 12 19C14.8 19 17 16.8 17 14V10" stroke="white" strokeWidth="1.5" strokeLinecap="round"/>
-  </svg>
-);
-
 const LLM_OPTIONS: LLMOption[] = [
-  { id: 'claude-ext', name: 'Claude', icon: <ClaudeIcon />, description: 'Extension' },
-  { id: 'claude', name: 'Claude', icon: <ClaudeIcon />, description: 'Manuel' },
-  { id: 'kiro', name: 'Kiro', icon: <KiroIcon />, description: 'AWS' },
-  { id: 'cursor', name: 'Cursor', icon: <CursorIcon />, description: 'Editor' },
-  { id: 'windsurf', name: 'Windsurf', icon: <WindsurfIcon />, description: 'Codeium' },
-  { id: 'other', name: 'Autre MCP', icon: <PlugIcon />, description: 'Générique' },
+  { id: 'claude-ext', name: 'Claude', icon: '/static/logos/claude.svg', description: 'Extension' },
+  { id: 'claude', name: 'Claude', icon: '/static/logos/claude.svg', description: 'Manuel' },
+  { id: 'kiro', name: 'Kiro', icon: '/static/logos/kiro.png', description: 'AWS' },
+  { id: 'cursor', name: 'Cursor', icon: '/static/logos/cursor.svg', description: 'Editor' },
+  { id: 'windsurf', name: 'Windsurf', icon: '/static/logos/windsurf.svg', description: 'Codeium' },
+  { id: 'other', name: 'Autre MCP', icon: '', description: 'Générique' },
 ];
 
 function getInstructions(choice: LLMChoice): { steps: string[]; config?: string; note?: string } {
@@ -182,7 +146,11 @@ export function SetupPage() {
               className={`setup-option ${selected === opt.id ? 'active' : ''}`}
               onClick={() => { setSelected(opt.id); setCopied(false); }}
             >
-              <span className="setup-option-icon">{opt.icon}</span>
+              {opt.icon ? (
+                <img src={opt.icon} alt={opt.name} className="setup-option-icon" />
+              ) : (
+                <span className="setup-option-icon setup-option-icon-plug">MCP</span>
+              )}
               <span className="setup-option-name">{opt.name}</span>
               <span className="setup-option-desc">{opt.description}</span>
             </button>
