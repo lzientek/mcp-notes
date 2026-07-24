@@ -57,9 +57,8 @@
 }
 
 .landing-logo {
-  height: 40px;
+  height: 70px;
   margin-bottom: 1.5rem;
-  filter: brightness(0) invert(1);
 }
 
 .landing-hero-text h1 {

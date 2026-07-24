@@ -54,7 +54,7 @@ function getInstructions(choice: LLMChoice): { steps: string[]; config?: string;
         steps: [
           'Créez ou éditez le fichier .kiro/settings/mcp.json dans votre workspace',
           'Ajoutez la configuration ci-dessous',
-          'Kiro détecte automatiquement le nouveau serveur MCP',
+          'Redémarrez votre session Kiro (les serveurs MCP sont chargés au démarrage)',
           'Demandez à Kiro : "Connecte-moi à Notlai via web"',
         ],
         config: JSON.stringify({
@@ -62,10 +62,18 @@ function getInstructions(choice: LLMChoice): { steps: string[]; config?: string;
             notlai: {
               command: 'npx',
               args: ['-y', 'notlai-mcp'],
+              timeout: 30000,
+              type: 'stdio',
+              autoApprove: [
+                'notlai_status',
+                'notlai_list_notes',
+                'notlai_get_note',
+                'notlai_list_tags',
+              ],
             },
           },
         }, null, 2),
-        note: 'Pour un accès global (tous les workspaces) : ~/.kiro/settings/mcp.json',
+        note: 'Le timeout est recommandé (le premier lancement télécharge le package). autoApprove permet aux outils de lecture de s\'exécuter sans confirmation. Pour un accès global : ~/.kiro/settings/mcp.json',
       };
     case 'cursor':
       return {
