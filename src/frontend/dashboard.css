@@ -376,6 +376,48 @@
   margin-bottom: 0.3rem;
 }
 
+/* Task list checkboxes (marked generates li > input[type=checkbox]) */
+.markdown-body li:has(> input[type="checkbox"]) {
+  list-style: none;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin-left: -1.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.markdown-body li > input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 1.15rem;
+  height: 1.15rem;
+  min-width: 1.15rem;
+  border: 2px solid #d1d5db;
+  border-radius: 5px;
+  margin-top: 0.2rem;
+  cursor: default;
+  position: relative;
+  background: white;
+  flex-shrink: 0;
+}
+
+.markdown-body li > input[type="checkbox"]:checked {
+  background: #6366f1;
+  border-color: #6366f1;
+}
+
+.markdown-body li > input[type="checkbox"]:checked::after {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 1px;
+  width: 5px;
+  height: 9px;
+  border: solid white;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
 .markdown-body ul.contains-task-list {
   list-style: none;
   padding-left: 0.25rem;
