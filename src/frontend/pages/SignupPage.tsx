@@ -178,6 +178,7 @@ export function SignupPage() {
             <a href="/setup">Installation</a>
             <a href="https://github.com/lzientek/notlai-mcp" target="_blank" rel="noopener noreferrer">GitHub</a>
             <a href="https://www.npmjs.com/package/notlai-mcp" target="_blank" rel="noopener noreferrer">npm</a>
+            <a href="https://github.com/lzientek/notlai-mcp/issues/new" target="_blank" rel="noopener noreferrer">Report a bug</a>
           </div>
           <p className="landing-footer-copy">MIT License — Built with AI, for AI workflows.</p>
         </div>
