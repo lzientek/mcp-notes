@@ -66,7 +66,7 @@ export function SignupPage() {
         <div className="landing-hero-bg" />
         <div className="landing-hero-content">
           <div className="landing-hero-text">
-            <img src="/static/notlai_logo_text_right.png" alt="Notlai" className="landing-logo" />
+            <img src="/static/notlai_logo_white_transparent.png" alt="Notlai" className="landing-logo" />
             <h1>Vos notes, propulsées par l'IA</h1>
             <p className="landing-subtitle">
               Prenez des notes directement depuis vos conversations avec Claude, ChatGPT ou tout assistant IA compatible MCP. Retrouvez-les ici, organisées et toujours accessibles.
@@ -175,6 +175,7 @@ export function SignupPage() {
         <div className="landing-footer-content">
           <img src="/static/notlai_logo_only.png" alt="Notlai" className="landing-footer-logo" />
           <div className="landing-footer-links">
+            <a href="/setup">Installation</a>
             <a href="https://github.com/lzientek/notlai-mcp" target="_blank" rel="noopener noreferrer">GitHub</a>
             <a href="https://www.npmjs.com/package/notlai-mcp" target="_blank" rel="noopener noreferrer">npm</a>
           </div>
