@@ -15,5 +15,14 @@ export function NoteDetailPage() {
     return null;
   }
 
-  return <NoteDetail noteId={noteId} onBack={handleBack} />;
+  return (
+    <div className="dashboard">
+      <header className="dashboard-header">
+        <a href="/" aria-label="Retour à la liste des notes">
+          <img src="/static/notlai_logo_text_right.png" alt="Notlai" className="logo" />
+        </a>
+      </header>
+      <NoteDetail noteId={noteId} onBack={handleBack} />
+    </div>
+  );
 }

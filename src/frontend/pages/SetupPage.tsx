@@ -129,7 +129,9 @@ export function SetupPage() {
   return (
     <div className="setup-page">
       <div className="setup-header">
-        <img src="/static/notlai_logo_text_right.png" alt="Notlai" className="setup-logo" />
+        <a href="/" aria-label="Retour à l'accueil">
+          <img src="/static/notlai_logo_text_right.png" alt="Notlai" className="setup-logo" />
+        </a>
       </div>
 
       <div className="setup-content">
