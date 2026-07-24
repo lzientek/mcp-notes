@@ -157,6 +157,13 @@ export function SetupPage() {
           ))}
         </div>
 
+        {!instructions && (
+          <div className="setup-placeholder">
+            <div className="setup-placeholder-icon">👆</div>
+            <p>Sélectionnez votre assistant IA pour voir les instructions d'installation</p>
+          </div>
+        )}
+
         {instructions && (
           <div className="setup-instructions">
             <h2>Étapes d'installation</h2>
