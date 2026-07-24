@@ -25,7 +25,7 @@ export const handler = async (
     };
   }
 
-  let body: { title?: string; content?: string; tags?: string[] };
+  let body: { title?: string; content?: string; tags?: string[]; isFavorite?: boolean };
   try {
     body = JSON.parse(event.body ?? '{}');
   } catch {
@@ -43,6 +43,7 @@ export const handler = async (
   const title = body.title ?? 'Untitled';
   const content = body.content ?? '';
   const tags = body.tags ?? [];
+  const isFavorite = body.isFavorite ?? false;
 
   // Validate tags if provided
   if (tags.length > 0) {
@@ -69,6 +70,7 @@ export const handler = async (
     title,
     content,
     tags: tags.map((t) => t.toLowerCase()),
+    isFavorite,
     createdAt: now,
     updatedAt: now,
   };

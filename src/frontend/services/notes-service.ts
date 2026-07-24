@@ -1,4 +1,4 @@
-import { apiGet } from './api-client.js';
+import { apiGet, apiPut } from './api-client.js';
 import type { NotesFilters, NotesListResponse, Note } from '../types.js';
 
 export async function fetchNotes(filters: NotesFilters = {}): Promise<NotesListResponse> {
@@ -16,6 +16,9 @@ export async function fetchNotes(filters: NotesFilters = {}): Promise<NotesListR
   if (filters.search) {
     params.search = filters.search;
   }
+  if (filters.favorites) {
+    params.favorites = 'true';
+  }
   if (filters.limit) {
     params.limit = String(filters.limit);
   }
@@ -28,4 +31,8 @@ export async function fetchNotes(filters: NotesFilters = {}): Promise<NotesListR
 
 export async function fetchNote(noteId: string): Promise<Note> {
   return apiGet<Note>(`/notes/${encodeURIComponent(noteId)}`);
+}
+
+export async function toggleFavorite(noteId: string, isFavorite: boolean): Promise<Note> {
+  return apiPut<Note>(`/notes/${encodeURIComponent(noteId)}`, { isFavorite });
 }

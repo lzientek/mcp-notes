@@ -37,7 +37,7 @@ export const handler = async (
     };
   }
 
-  let body: { title?: string; content?: string; tags?: string[] };
+  let body: { title?: string; content?: string; tags?: string[]; isFavorite?: boolean };
   try {
     body = JSON.parse(event.body ?? '{}');
   } catch {
@@ -97,6 +97,7 @@ export const handler = async (
     title: body.title ?? existing.Item.title,
     content: body.content ?? existing.Item.content,
     tags: tags !== undefined ? tags : (existing.Item.tags ?? []),
+    isFavorite: body.isFavorite !== undefined ? body.isFavorite : (existing.Item.isFavorite ?? false),
     updatedAt: new Date().toISOString(),
   };
 

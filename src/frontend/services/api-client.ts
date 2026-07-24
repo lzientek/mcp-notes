@@ -72,3 +72,39 @@ export async function apiGet<T>(
 
   return res.json();
 }
+
+
+export async function apiPut<T>(
+  path: string,
+  body: unknown,
+): Promise<T> {
+  const token = getIdToken();
+  if (!token) {
+    redirectToLogin();
+    throw new ApiError('No token', 401);
+  }
+
+  const url = new URL(path, API_BASE);
+
+  const res = await fetch(url.toString(), {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (res.status === 401) {
+    clearSession();
+    redirectToLogin();
+    throw new ApiError('Unauthorized', 401);
+  }
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new ApiError(text || `API error: ${res.status}`, res.status);
+  }
+
+  return res.json();
+}

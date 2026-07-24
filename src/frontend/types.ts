@@ -33,6 +33,7 @@ export interface Note {
   title: string;
   content: string;
   tags: string[];
+  isFavorite: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -48,6 +49,7 @@ export interface NotesFilters {
   from?: string;
   to?: string;
   search?: string;
+  favorites?: boolean;
   limit?: number;
   cursor?: string;
 }

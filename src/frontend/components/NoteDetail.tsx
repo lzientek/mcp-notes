@@ -1,6 +1,6 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { marked } from 'marked';
-import { fetchNote } from '../services/notes-service.js';
+import { fetchNote, toggleFavorite } from '../services/notes-service.js';
 import type { Note } from '../types.js';
 
 // Configure marked for safe rendering (no raw HTML)
@@ -18,6 +18,7 @@ export function NoteDetail({ noteId, onBack }: NoteDetailProps) {
   const [note, setNote] = useState<Note | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [togglingFav, setTogglingFav] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -39,6 +40,19 @@ export function NoteDetail({ noteId, onBack }: NoteDetailProps) {
       cancelled = true;
     };
   }, [noteId]);
+
+  const handleToggleFavorite = useCallback(async () => {
+    if (!note || togglingFav) return;
+    setTogglingFav(true);
+    try {
+      const updated = await toggleFavorite(note.noteId, !note.isFavorite);
+      setNote(updated);
+    } catch {
+      // silently fail
+    } finally {
+      setTogglingFav(false);
+    }
+  }, [note, togglingFav]);
 
   if (isLoading) {
     return (
@@ -70,7 +84,19 @@ export function NoteDetail({ noteId, onBack }: NoteDetailProps) {
         ← Retour
       </button>
       <article>
-        <h1>{note.title}</h1>
+        <div className="note-detail-header">
+          <h1>{note.title}</h1>
+          <button
+            type="button"
+            className={`favorite-btn ${note.isFavorite ? 'active' : ''}`}
+            onClick={handleToggleFavorite}
+            disabled={togglingFav}
+            aria-label={note.isFavorite ? 'Retirer des favoris' : 'Ajouter aux favoris'}
+            title={note.isFavorite ? 'Retirer des favoris' : 'Ajouter aux favoris'}
+          >
+            {note.isFavorite ? '★' : '☆'}
+          </button>
+        </div>
         {note.tags.length > 0 && (
           <div className="note-detail-tags">
             {note.tags.map((tag) => (

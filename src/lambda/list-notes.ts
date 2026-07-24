@@ -28,6 +28,7 @@ export const handler = async (
   const tagsFilter = params.tags ? params.tags.split(',').map((t) => t.trim().toLowerCase()) : null;
   const fromDate = params.from ?? null;
   const toDate = params.to ?? null;
+  const favoritesOnly = params.favorites === 'true';
 
   // Build query — we always query by userId (partition key)
   // Filtering is done in-memory after query since DynamoDB filter expressions
@@ -69,6 +70,10 @@ export const handler = async (
     });
   }
 
+  if (favoritesOnly) {
+    notes = notes.filter((note) => note.isFavorite === true);
+  }
+
   // Sort by updatedAt descending
   notes.sort((a, b) =>
     (b.updatedAt as string).localeCompare(a.updatedAt as string),
@@ -81,9 +86,15 @@ export const handler = async (
       ? (paginatedNotes[paginatedNotes.length - 1].noteId as string)
       : null;
 
+  // Ensure isFavorite field (retrocompat)
+  const output = paginatedNotes.map((note) => ({
+    ...note,
+    isFavorite: note.isFavorite ?? false,
+  }));
+
   return {
     statusCode: 200,
     headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
-    body: JSON.stringify({ notes: paginatedNotes, nextCursor }),
+    body: JSON.stringify({ notes: output, nextCursor }),
   };
 };

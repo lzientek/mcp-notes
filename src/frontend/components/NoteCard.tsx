@@ -58,7 +58,10 @@ export function NoteCard({ note, onSelect }: NoteCardProps) {
       role="button"
       aria-label={`Ouvrir la note : ${note.title}`}
     >
-      <h3 className="note-card-title">{note.title}</h3>
+      <div className="note-card-title-row">
+        <h3 className="note-card-title">{note.title}</h3>
+        {note.isFavorite && <span className="note-card-star" aria-label="Favori">★</span>}
+      </div>
       <p className="note-card-excerpt">{excerpt}</p>
       <div className="note-card-meta">
         {note.tags.length > 0 && (

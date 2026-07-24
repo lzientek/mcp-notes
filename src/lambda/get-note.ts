@@ -57,6 +57,6 @@ export const handler = async (
   return {
     statusCode: 200,
     headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
-    body: JSON.stringify(result.Item),
+    body: JSON.stringify({ ...result.Item, isFavorite: result.Item.isFavorite ?? false }),
   };
 };
