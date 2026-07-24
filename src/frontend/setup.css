@@ -39,24 +39,23 @@
 
 /* ─── LLM Options Grid ──────────────────────────────────────────── */
 .setup-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 1rem;
+  display: flex;
+  gap: 0.75rem;
   margin-bottom: 2.5rem;
+  flex-wrap: wrap;
 }
 
 .setup-option {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 0.4rem;
-  padding: 1.25rem 1rem;
+  gap: 0.5rem;
+  padding: 0.6rem 1rem;
   background: white;
   border: 2px solid #e5e7eb;
-  border-radius: 12px;
+  border-radius: 10px;
   cursor: pointer;
   transition: all 0.2s;
-  text-align: center;
+  white-space: nowrap;
 }
 
 .setup-option:hover {
@@ -71,19 +70,21 @@
 }
 
 .setup-option-icon {
-  font-size: 1.8rem;
-  margin-bottom: 0.2rem;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
 }
 
 .setup-option-name {
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   font-weight: 600;
   color: #1f2937;
 }
 
 .setup-option-desc {
-  font-size: 0.75rem;
+  font-size: 0.7rem;
   color: #9ca3af;
+  margin-left: -0.2rem;
 }
 
 /* ─── Instructions ──────────────────────────────────────────────── */
@@ -252,7 +253,11 @@
   }
 
   .setup-grid {
-    grid-template-columns: repeat(2, 1fr);
+    flex-direction: column;
+  }
+
+  .setup-option {
+    width: 100%;
   }
 
   .setup-instructions {
