@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main, dev]
+  push:
+    branches: [main]
+
+jobs:
+  backend-tests:
+    name: Backend (Lambda + CDK)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: Type-check
+        run: npm run lint
+
+      - name: Unit tests (Lambda)
+        run: npx vitest run tests/unit/lambda/
+
+      - name: CDK tests
+        run: npx vitest run tests/cdk/
+
+  frontend-tests:
+    name: Frontend (Components + Hooks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: Frontend unit tests
+        run: npx vitest run tests/unit/frontend/ tests/unit/lambda/helpers/
+
+      - name: Build frontend
+        run: node scripts/build-frontend.js
