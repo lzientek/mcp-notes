@@ -4,6 +4,7 @@ import { LoginPage } from './pages/LoginPage.js';
 import { SetupPage } from './pages/SetupPage.js';
 import { DashboardPage } from './pages/DashboardPage.js';
 import { NoteDetailPage } from './pages/NoteDetailPage.js';
+import { SharedNotePage } from './pages/SharedNotePage.js';
 import { isAuthenticated } from './services/api-client.js';
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -56,6 +57,7 @@ export function AppRouter() {
           path="/setup"
           element={<SetupPage />}
         />
+        <Route path="/shared/:shareId" element={<SharedNotePage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>

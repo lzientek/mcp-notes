@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { marked } from 'marked';
 import { fetchNote, toggleFavorite } from '../services/notes-service.js';
+import { ShareModal } from './ShareModal.js';
 import type { Note } from '../types.js';
 
 // Configure marked for safe rendering (no raw HTML)
@@ -19,6 +20,7 @@ export function NoteDetail({ noteId, onBack }: NoteDetailProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [togglingFav, setTogglingFav] = useState(false);
+  const [showShareModal, setShowShareModal] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -96,6 +98,14 @@ export function NoteDetail({ noteId, onBack }: NoteDetailProps) {
           >
             {note.isFavorite ? '★' : '☆'}
           </button>
+          <button
+            type="button"
+            className="share-btn"
+            onClick={() => setShowShareModal(true)}
+            title="Partager cette note"
+          >
+            🔗
+          </button>
         </div>
         {note.tags.length > 0 && (
           <div className="note-detail-tags">
@@ -115,6 +125,7 @@ export function NoteDetail({ noteId, onBack }: NoteDetailProps) {
           dangerouslySetInnerHTML={{ __html: marked.parse(note.content) as string }}
         />
       </article>
+      {showShareModal && <ShareModal noteId={noteId} onClose={() => setShowShareModal(false)} />}
     </div>
   );
 }
