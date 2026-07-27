@@ -1,8 +1,11 @@
-import type { Note } from '../types.js';
+import type { Note, Folder } from '../types.js';
 
 interface NoteCardProps {
   note: Note;
   onSelect: (noteId: string) => void;
+  isSelectionMode?: boolean;
+  isSelected?: boolean;
+  folders?: Folder[];
 }
 
 function stripMarkdown(text: string): string {
@@ -40,13 +43,16 @@ function formatRelativeDate(dateStr: string): string {
   return date.toLocaleDateString('fr-FR');
 }
 
-export function NoteCard({ note, onSelect }: NoteCardProps) {
+export function NoteCard({ note, onSelect, isSelectionMode, isSelected, folders }: NoteCardProps) {
   const plain = stripMarkdown(note.content);
   const excerpt = plain.length > 120 ? `${plain.slice(0, 120)}…` : plain;
+  const folderName = note.folderId && folders
+    ? folders.find((f) => f.folderId === note.folderId)?.name
+    : null;
 
   return (
     <article
-      className="note-card"
+      className={`note-card ${isSelected ? 'note-card-selected' : ''}`}
       onClick={() => onSelect(note.noteId)}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
@@ -56,14 +62,22 @@ export function NoteCard({ note, onSelect }: NoteCardProps) {
       }}
       tabIndex={0}
       role="button"
-      aria-label={`Ouvrir la note : ${note.title}`}
+      aria-label={`${isSelectionMode ? 'Sélectionner' : 'Ouvrir'} la note : ${note.title}`}
     >
+      {isSelectionMode && (
+        <span className={`note-card-checkbox ${isSelected ? 'checked' : ''}`} aria-hidden="true">
+          {isSelected ? '✓' : ''}
+        </span>
+      )}
       <div className="note-card-title-row">
         <h3 className="note-card-title">{note.title}</h3>
         {note.isFavorite && <span className="note-card-star" aria-label="Favori">★</span>}
       </div>
       <p className="note-card-excerpt">{excerpt}</p>
       <div className="note-card-meta">
+        {folderName && (
+          <span className="note-card-folder">📁 {folderName}</span>
+        )}
         {note.tags.length > 0 && (
           <div className="note-card-tags">
             {note.tags.map((tag) => (

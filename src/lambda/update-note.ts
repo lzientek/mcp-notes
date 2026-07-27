@@ -38,7 +38,7 @@ export const handler = async (
     };
   }
 
-  let body: { title?: string; content?: string; tags?: string[]; isFavorite?: boolean };
+  let body: { title?: string; content?: string; tags?: string[]; folderId?: string | null; isFavorite?: boolean };
   try {
     body = JSON.parse(event.body ?? '{}');
   } catch {
@@ -185,6 +185,7 @@ export const handler = async (
     title: body.title ?? note.title,
     content: body.content ?? note.content,
     tags: tags !== undefined ? tags : (note.tags ?? []),
+    folderId: body.folderId !== undefined ? body.folderId : (note.folderId ?? null),
     isFavorite: isOwner
       ? (body.isFavorite !== undefined ? body.isFavorite : (note.isFavorite ?? false))
       : (note.isFavorite ?? false),

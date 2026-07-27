@@ -1,4 +1,4 @@
-import { apiGet, apiPut } from './api-client.js';
+import { apiGet, apiPut, apiPost } from './api-client.js';
 import type { NotesFilters, NotesListResponse, Note } from '../types.js';
 
 export async function fetchNotes(filters: NotesFilters = {}): Promise<NotesListResponse> {
@@ -19,6 +19,9 @@ export async function fetchNotes(filters: NotesFilters = {}): Promise<NotesListR
   if (filters.favorites) {
     params.favorites = 'true';
   }
+  if (filters.folderId) {
+    params.folderId = filters.folderId;
+  }
   if (filters.limit) {
     params.limit = String(filters.limit);
   }
@@ -35,4 +38,12 @@ export async function fetchNote(noteId: string): Promise<Note> {
 
 export async function toggleFavorite(noteId: string, isFavorite: boolean): Promise<Note> {
   return apiPut<Note>(`/notes/${encodeURIComponent(noteId)}`, { isFavorite });
+}
+
+export async function moveNote(noteId: string, folderId: string | null): Promise<Note> {
+  return apiPut<Note>(`/notes/${encodeURIComponent(noteId)}`, { folderId });
+}
+
+export async function bulkDeleteNotes(noteIds: string[]): Promise<{ deleted: number }> {
+  return apiPost<{ deleted: number }>('/notes/bulk-delete', { noteIds });
 }

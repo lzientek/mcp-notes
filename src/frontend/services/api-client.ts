@@ -176,3 +176,36 @@ export async function apiPut<T>(
 
   return res.json();
 }
+
+export async function apiPost<T>(
+  path: string,
+  body: unknown,
+): Promise<T> {
+  const url = new URL(path, API_BASE);
+
+  const res = await fetchWithAuth(url.toString(), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new ApiError(text || `API error: ${res.status}`, res.status);
+  }
+
+  return res.json();
+}
+
+export async function apiDelete(path: string): Promise<void> {
+  const url = new URL(path, API_BASE);
+
+  const res = await fetchWithAuth(url.toString(), {
+    method: 'DELETE',
+  });
+
+  if (!res.ok && res.status !== 204) {
+    const text = await res.text();
+    throw new ApiError(text || `API error: ${res.status}`, res.status);
+  }
+}

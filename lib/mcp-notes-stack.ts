@@ -25,6 +25,7 @@ export class McpNotesStack extends cdk.Stack {
   public readonly notesTable: dynamodb.Table;
   public readonly tagsTable: dynamodb.Table;
   public readonly sharesTable: dynamodb.Table;
+  public readonly foldersTable: dynamodb.Table;
   public readonly api: apigateway.RestApi;
 
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -117,6 +118,14 @@ export class McpNotesStack extends cdk.Stack {
     this.sharesTable.addGlobalSecondaryIndex({
       indexName: 'RecipientEmailIndex',
       partitionKey: { name: 'recipientEmail', type: dynamodb.AttributeType.STRING },
+    });
+
+    // ─── DynamoDB Folders Table ──────────────────────────────────────────
+    this.foldersTable = new dynamodb.Table(this, 'McpNotesFoldersTable', {
+      partitionKey: { name: 'userId', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'folderId', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
 
     // ─── Lambda Functions (Notes CRUD) ───────────────────────────────────
@@ -244,6 +253,50 @@ export class McpNotesStack extends cdk.Stack {
       },
     });
 
+    // ─── Lambda Functions (Folders CRUD) ─────────────────────────────────
+    const listFoldersFn = new NodejsFunction(this, 'ListFoldersFn', {
+      runtime: lambda.Runtime.NODEJS_22_X,
+      entry: path.join(lambdaDir, 'list-folders.ts'),
+      handler: 'handler',
+      description: 'List all folders for the authenticated user',
+      environment: {
+        FOLDERS_TABLE_NAME: this.foldersTable.tableName,
+      },
+    });
+
+    const createFolderFn = new NodejsFunction(this, 'CreateFolderFn', {
+      runtime: lambda.Runtime.NODEJS_22_X,
+      entry: path.join(lambdaDir, 'create-folder.ts'),
+      handler: 'handler',
+      description: 'Create a new folder',
+      environment: {
+        FOLDERS_TABLE_NAME: this.foldersTable.tableName,
+      },
+    });
+
+    const deleteFolderFn = new NodejsFunction(this, 'DeleteFolderFn', {
+      runtime: lambda.Runtime.NODEJS_22_X,
+      entry: path.join(lambdaDir, 'delete-folder.ts'),
+      handler: 'handler',
+      description: 'Delete a folder and move notes back to root',
+      environment: {
+        FOLDERS_TABLE_NAME: this.foldersTable.tableName,
+        TABLE_NAME: this.notesTable.tableName,
+      },
+    });
+
+    // ─── Lambda Functions (Bulk Operations) ──────────────────────────────
+    const bulkDeleteNotesFn = new NodejsFunction(this, 'BulkDeleteNotesFn', {
+      runtime: lambda.Runtime.NODEJS_22_X,
+      entry: path.join(lambdaDir, 'bulk-delete-notes.ts'),
+      handler: 'handler',
+      description: 'Delete multiple notes at once',
+      environment: {
+        TABLE_NAME: this.notesTable.tableName,
+        SHARES_TABLE_NAME: this.sharesTable.tableName,
+      },
+    });
+
     // ─── DynamoDB Permissions ────────────────────────────────────────────
     // Notes table
     this.notesTable.grantReadData(listNotesFn);
@@ -272,6 +325,18 @@ export class McpNotesStack extends cdk.Stack {
     this.notesTable.grantReadData(shareNoteFn);
     this.notesTable.grantReadData(unshareNoteFn);
     this.notesTable.grantReadData(getSharedNoteFn);
+
+    // Folders table
+    this.foldersTable.grantReadData(listFoldersFn);
+    this.foldersTable.grantReadWriteData(createFolderFn);
+    this.foldersTable.grantReadWriteData(deleteFolderFn);
+
+    // Notes table access for folder/bulk operations
+    this.notesTable.grantReadWriteData(deleteFolderFn);
+    this.notesTable.grantReadWriteData(bulkDeleteNotesFn);
+
+    // Shares table access for bulk delete (cascade)
+    this.sharesTable.grantReadWriteData(bulkDeleteNotesFn);
 
     // ─── API Gateway ─────────────────────────────────────────────────────
     this.api = new apigateway.RestApi(this, 'McpNotesApi', {
@@ -374,6 +439,35 @@ export class McpNotesStack extends cdk.Stack {
     singleTag.addMethod(
       'DELETE',
       new apigateway.LambdaIntegration(deleteTagFn),
+      authorizationOptions,
+    );
+
+    // /folders
+    const folders = this.api.root.addResource('folders');
+    folders.addMethod(
+      'GET',
+      new apigateway.LambdaIntegration(listFoldersFn),
+      authorizationOptions,
+    );
+    folders.addMethod(
+      'POST',
+      new apigateway.LambdaIntegration(createFolderFn),
+      authorizationOptions,
+    );
+
+    // /folders/{folderId}
+    const singleFolder = folders.addResource('{folderId}');
+    singleFolder.addMethod(
+      'DELETE',
+      new apigateway.LambdaIntegration(deleteFolderFn),
+      authorizationOptions,
+    );
+
+    // /notes/bulk-delete
+    const bulkDelete = notes.addResource('bulk-delete');
+    bulkDelete.addMethod(
+      'POST',
+      new apigateway.LambdaIntegration(bulkDeleteNotesFn),
       authorizationOptions,
     );
 
@@ -571,6 +665,10 @@ function handler(event) {
 
     new cdk.CfnOutput(this, 'SharesTableName', {
       value: this.sharesTable.tableName,
+    });
+
+    new cdk.CfnOutput(this, 'FoldersTableName', {
+      value: this.foldersTable.tableName,
     });
 
     new cdk.CfnOutput(this, 'ApiUrl', {

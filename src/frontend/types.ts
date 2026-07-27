@@ -33,6 +33,7 @@ export interface Note {
   title: string;
   content: string;
   tags: string[];
+  folderId: string | null;
   isFavorite: boolean;
   createdAt: string;
   updatedAt: string;
@@ -44,12 +45,19 @@ export interface Tag {
   createdAt: string;
 }
 
+export interface Folder {
+  folderId: string;
+  name: string;
+  createdAt: string;
+}
+
 export interface NotesFilters {
   tags?: string[];
   from?: string;
   to?: string;
   search?: string;
   favorites?: boolean;
+  folderId?: string;
   limit?: number;
   cursor?: string;
 }
@@ -61,4 +69,8 @@ export interface NotesListResponse {
 
 export interface TagsListResponse {
   tags: Tag[];
+}
+
+export interface FoldersListResponse {
+  folders: Folder[];
 }

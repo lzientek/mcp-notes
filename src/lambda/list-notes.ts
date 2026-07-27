@@ -31,6 +31,7 @@ export const handler = async (
   const fromDate = params.from ?? null;
   const toDate = params.to ?? null;
   const favoritesOnly = params.favorites === 'true';
+  const folderId = params.folderId ?? null;
   const scope = params.scope ?? 'own';
 
   // Validate scope parameter
@@ -158,6 +159,15 @@ export const handler = async (
 
   if (favoritesOnly) {
     notes = notes.filter((note) => note.isFavorite === true);
+  }
+
+  // Filter by folder
+  if (folderId) {
+    if (folderId === 'root') {
+      notes = notes.filter((note) => !note.folderId);
+    } else {
+      notes = notes.filter((note) => note.folderId === folderId);
+    }
   }
 
   // Sort by updatedAt descending
