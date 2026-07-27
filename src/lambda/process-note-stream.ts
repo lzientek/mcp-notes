@@ -4,10 +4,12 @@ import { DynamoDBDocumentClient, PutCommand, QueryCommand, DeleteCommand } from 
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 import type { AttributeValue } from '@aws-sdk/client-dynamodb';
 import { ulid } from 'ulid';
+import { computeDiff } from './helpers/line-diff.js';
 
 const client = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const ACTIVITY_TABLE_NAME = process.env.ACTIVITY_TABLE_NAME!;
 const MAX_EVENTS_PER_NOTE = 200;
+const DIFF_TTL_SECONDS = 30 * 24 * 60 * 60; // 30 days
 
 interface ActivityEvent {
   noteId: string;
@@ -31,10 +33,17 @@ function arraysEqual(a: string[], b: string[]): boolean {
   return sortedA.every((val, i) => val === sortedB[i]);
 }
 
+interface DiffItem {
+  noteId: string;
+  timestamp: string;
+  hunks: unknown;
+  ttl: number;
+}
+
 function detectChanges(
   oldImage: Record<string, unknown>,
   newImage: Record<string, unknown>,
-): ActivityEvent[] {
+): { events: ActivityEvent[]; diffItems: DiffItem[] } {
   const noteId = newImage.noteId as string;
   const now = newImage.updatedAt as string ?? new Date().toISOString();
   const actorId = (newImage.lastModifiedByUser as string) ?? (newImage.userId as string) ?? null;
@@ -42,6 +51,7 @@ function detectChanges(
   const source = (newImage.lastModifiedBy as string) ?? null;
 
   const events: ActivityEvent[] = [];
+  const diffItems: DiffItem[] = [];
 
   const makeEvent = (action: string, details: Record<string, unknown> | null): ActivityEvent => ({
     noteId,
@@ -63,7 +73,22 @@ function detectChanges(
 
   // Content changed
   if (oldImage.content !== newImage.content) {
-    events.push(makeEvent('content_updated', null));
+    const eventTs = `${now}#${ulid()}`;
+    events.push(makeEvent('content_updated', { hasDiff: true }));
+    // Override the timestamp to match the diff item
+    events[events.length - 1].timestamp = eventTs;
+
+    // Compute diff and store separately
+    const hunks = computeDiff(
+      (oldImage.content as string) ?? '',
+      (newImage.content as string) ?? '',
+    );
+    diffItems.push({
+      noteId,
+      timestamp: `diff#${eventTs}`,
+      hunks,
+      ttl: Math.floor(Date.now() / 1000) + DIFF_TTL_SECONDS,
+    });
   }
 
   // Tags diff
@@ -97,7 +122,7 @@ function detectChanges(
     events.push(makeEvent('favorite_toggled', { isFavorite: newFav }));
   }
 
-  return events;
+  return { events, diffItems };
 }
 
 async function purgeOldEvents(noteId: string): Promise<void> {
@@ -138,6 +163,7 @@ export const handler = async (event: DynamoDBStreamEvent): Promise<void> => {
       if (!noteId) continue;
 
       let events: ActivityEvent[] = [];
+      let diffItems: DiffItem[] = [];
 
       if (eventName === 'INSERT' && newImage) {
         // Note created
@@ -152,7 +178,9 @@ export const handler = async (event: DynamoDBStreamEvent): Promise<void> => {
         });
       } else if (eventName === 'MODIFY' && oldImage && newImage) {
         // Note updated — detect what changed
-        events = detectChanges(oldImage, newImage);
+        const changes = detectChanges(oldImage, newImage);
+        events = changes.events;
+        diffItems = changes.diffItems;
       } else if (eventName === 'REMOVE' && oldImage) {
         // Note deleted — we don't track this in activity (note is gone)
         // But we could clean up activity records
@@ -169,6 +197,16 @@ export const handler = async (event: DynamoDBStreamEvent): Promise<void> => {
               ...activityEvent,
               ttl: Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60, // 1 year
             },
+          }),
+        );
+      }
+
+      // Write diff items (separate TTL of 30 days)
+      for (const diffItem of diffItems) {
+        await client.send(
+          new PutCommand({
+            TableName: ACTIVITY_TABLE_NAME,
+            Item: diffItem,
           }),
         );
       }

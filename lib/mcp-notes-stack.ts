@@ -338,6 +338,16 @@ export class McpNotesStack extends cdk.Stack {
       },
     });
 
+    const getActivityDiffFn = new NodejsFunction(this, 'GetActivityDiffFn', {
+      runtime: lambda.Runtime.NODEJS_22_X,
+      entry: path.join(lambdaDir, 'get-activity-diff.ts'),
+      handler: 'handler',
+      description: 'Get content diff for a specific activity event',
+      environment: {
+        ACTIVITY_TABLE_NAME: this.activityTable.tableName,
+      },
+    });
+
     // ─── DynamoDB Permissions ────────────────────────────────────────────
     // Notes table
     this.notesTable.grantReadData(listNotesFn);
@@ -386,6 +396,9 @@ export class McpNotesStack extends cdk.Stack {
     // List activity needs read access to notes and shares for auth check
     this.notesTable.grantReadData(listActivityFn);
     this.sharesTable.grantReadData(listActivityFn);
+
+    // Get activity diff
+    this.activityTable.grantReadData(getActivityDiffFn);
 
     // ─── API Gateway ─────────────────────────────────────────────────────
     this.api = new apigateway.RestApi(this, 'McpNotesApi', {
@@ -525,6 +538,14 @@ export class McpNotesStack extends cdk.Stack {
     noteActivity.addMethod(
       'GET',
       new apigateway.LambdaIntegration(listActivityFn),
+      authorizationOptions,
+    );
+
+    // /notes/{noteId}/activity/diff
+    const noteActivityDiff = noteActivity.addResource('diff');
+    noteActivityDiff.addMethod(
+      'GET',
+      new apigateway.LambdaIntegration(getActivityDiffFn),
       authorizationOptions,
     );
 

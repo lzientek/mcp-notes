@@ -1054,6 +1054,74 @@
   color: #6366f1;
 }
 
+.activity-diff-toggle {
+  background: none;
+  border: none;
+  color: #6366f1;
+  font-size: 0.7rem;
+  cursor: pointer;
+  padding: 0 0.3rem;
+  margin-left: 0.3rem;
+}
+
+.activity-diff-toggle:hover {
+  text-decoration: underline;
+}
+
+.activity-diff-loading,
+.activity-diff-expired {
+  font-size: 0.7rem;
+  color: #9ca3af;
+  font-style: italic;
+}
+
+.activity-diff {
+  margin-top: 0.4rem;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid #e5e7eb;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 0.68rem;
+  line-height: 1.5;
+}
+
+.activity-diff-hunk {
+  padding: 0.3rem 0;
+}
+
+.activity-diff-hunk + .activity-diff-hunk {
+  border-top: 1px dashed #e5e7eb;
+}
+
+.activity-diff-line {
+  display: flex;
+  padding: 0 0.4rem;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.activity-diff-line-add {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.activity-diff-line-remove {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.activity-diff-line-context {
+  color: #6b7280;
+}
+
+.activity-diff-prefix {
+  flex-shrink: 0;
+  width: 1rem;
+  user-select: none;
+  color: inherit;
+  opacity: 0.6;
+}
+
 /* ─── Shared Note Public Page ───────────────────────────────────── */
 .shared-page {
   min-height: 100vh;

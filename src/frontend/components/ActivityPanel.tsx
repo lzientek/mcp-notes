@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { fetchActivity, type ActivityEvent } from '../services/activity-service.js';
+import { fetchActivity, fetchActivityDiff, type ActivityEvent, type DiffHunk } from '../services/activity-service.js';
 
 interface ActivityPanelProps {
   noteId: string;
@@ -71,6 +71,7 @@ export function ActivityPanel({ noteId }: ActivityPanelProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [expandedDiffs, setExpandedDiffs] = useState<Record<string, DiffHunk[] | 'loading' | 'expired'>>({});
 
   const load = useCallback(async (cursor?: string) => {
     setIsLoading(true);
@@ -89,6 +90,26 @@ export function ActivityPanel({ noteId }: ActivityPanelProps) {
   useEffect(() => {
     load();
   }, [load]);
+
+  const toggleDiff = useCallback(async (timestamp: string) => {
+    if (expandedDiffs[timestamp]) {
+      // Collapse
+      setExpandedDiffs((prev) => {
+        const next = { ...prev };
+        delete next[timestamp];
+        return next;
+      });
+      return;
+    }
+
+    setExpandedDiffs((prev) => ({ ...prev, [timestamp]: 'loading' }));
+    try {
+      const result = await fetchActivityDiff(noteId, timestamp);
+      setExpandedDiffs((prev) => ({ ...prev, [timestamp]: result.hunks }));
+    } catch {
+      setExpandedDiffs((prev) => ({ ...prev, [timestamp]: 'expired' }));
+    }
+  }, [noteId, expandedDiffs]);
 
   if (!loaded && isLoading) {
     return (
@@ -109,6 +130,9 @@ export function ActivityPanel({ noteId }: ActivityPanelProps) {
         {events.map((event) => {
           const aiLogo = event.source ? AI_LOGOS[event.source.toLowerCase()] : null;
           const actor = event.actorEmail ?? 'Utilisateur';
+          const hasDiff = event.action === 'content_updated' && (event.details as Record<string, unknown> | null)?.hasDiff;
+          const diffState = expandedDiffs[event.timestamp];
+
           return (
             <li key={event.timestamp} className="activity-event">
               <div className="activity-event-icon">
@@ -121,7 +145,37 @@ export function ActivityPanel({ noteId }: ActivityPanelProps) {
               <div className="activity-event-content">
                 <span className="activity-event-text">
                   <strong>{aiLogo?.alt ?? actor}</strong> {formatAction(event)}
+                  {hasDiff && (
+                    <button
+                      type="button"
+                      className="activity-diff-toggle"
+                      onClick={() => toggleDiff(event.timestamp)}
+                    >
+                      {diffState && diffState !== 'loading' && diffState !== 'expired' ? '▾ masquer' : '▸ diff'}
+                    </button>
+                  )}
                 </span>
+                {diffState === 'loading' && <span className="activity-diff-loading">Chargement…</span>}
+                {diffState === 'expired' && <span className="activity-diff-expired">Diff expiré (&gt; 30j)</span>}
+                {Array.isArray(diffState) && (
+                  <div className="activity-diff">
+                    {diffState.map((hunk, hi) => (
+                      <div key={hi} className="activity-diff-hunk">
+                        {hunk.lines.map((line, li) => (
+                          <div
+                            key={li}
+                            className={`activity-diff-line activity-diff-line-${line.type}`}
+                          >
+                            <span className="activity-diff-prefix">
+                              {line.type === 'add' ? '+' : line.type === 'remove' ? '-' : ' '}
+                            </span>
+                            <span>{line.content}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <time className="activity-event-time">{formatRelativeDate(event.timestamp)}</time>
               </div>
             </li>
