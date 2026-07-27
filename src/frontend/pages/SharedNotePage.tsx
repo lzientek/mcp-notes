@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import { marked } from 'marked';
+import { isAuthenticated, apiPost } from '../services/api-client.js';
 
 marked.setOptions({ breaks: true, gfm: true });
 
@@ -9,6 +10,8 @@ export function SharedNotePage() {
   const [note, setNote] = useState<{ title: string; content: string; createdAt: string; updatedAt: string } | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [importStatus, setImportStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const loggedIn = isAuthenticated();
 
   useEffect(() => {
     if (!shareId) return;
@@ -22,6 +25,20 @@ export function SharedNotePage() {
       .catch((err) => setError(err.message))
       .finally(() => setIsLoading(false));
   }, [shareId]);
+
+  const handleImport = useCallback(async () => {
+    if (!note) return;
+    setImportStatus('loading');
+    try {
+      await apiPost('/notes', {
+        title: note.title,
+        content: note.content,
+      });
+      setImportStatus('success');
+    } catch {
+      setImportStatus('error');
+    }
+  }, [note]);
 
   if (isLoading) {
     return (
@@ -62,7 +79,27 @@ export function SharedNotePage() {
         <a href="/" aria-label="Notlai">
           <img src="/static/notlai_logo_text_right.png" alt="Notlai" className="shared-page-logo" />
         </a>
-        <span className="shared-page-badge">Note partagée</span>
+        <div className="shared-page-header-actions">
+          <span className="shared-page-badge">Note partagée</span>
+          {loggedIn && importStatus === 'idle' && (
+            <button type="button" className="shared-page-import-btn" onClick={handleImport}>
+              Importer dans mes notes
+            </button>
+          )}
+          {importStatus === 'loading' && (
+            <span className="shared-page-import-status">Import en cours…</span>
+          )}
+          {importStatus === 'success' && (
+            <span className="shared-page-import-status success">
+              ✓ Importée ! <a href="/dashboard">Voir mes notes</a>
+            </span>
+          )}
+          {importStatus === 'error' && (
+            <span className="shared-page-import-status error">
+              Erreur — <button type="button" className="shared-page-retry-btn" onClick={handleImport}>réessayer</button>
+            </span>
+          )}
+        </div>
       </div>
       <article className="shared-page-content">
         <h1>{note.title}</h1>
