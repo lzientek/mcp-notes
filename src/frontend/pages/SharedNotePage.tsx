@@ -31,7 +31,9 @@ export function SharedNotePage() {
             <img src="/static/notlai_logo_text_right.png" alt="Notlai" className="shared-page-logo" />
           </a>
         </div>
-        <p className="loading">Chargement…</p>
+        <div className="shared-page-content">
+          <p className="loading">Chargement…</p>
+        </div>
       </div>
     );
   }
