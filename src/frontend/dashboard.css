@@ -609,6 +609,16 @@
   margin: 0 auto;
 }
 
+.empty-state a {
+  color: #6366f1;
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.empty-state a:hover {
+  text-decoration: underline;
+}
+
 .loading {
   text-align: center;
   padding: 2rem;

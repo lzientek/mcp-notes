@@ -168,7 +168,7 @@ export function Dashboard({ onSelectNote }: DashboardProps) {
         {!isLoading && notes.length === 0 && !error && (
           <div className="empty-state">
             <p>Aucune note pour le moment.</p>
-            <p>Créez vos premières notes via votre assistant IA (Claude, ChatGPT…) avec le serveur MCP Notlai.</p>
+            <p>Pour créer une note, <a href="/setup">configurez votre LLM préféré</a> avec le serveur MCP Notlai.</p>
           </div>
         )}
 
