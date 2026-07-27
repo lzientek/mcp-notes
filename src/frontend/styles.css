@@ -67,7 +67,7 @@ label {
   margin-bottom: 0.25rem;
 }
 
-input {
+input:not([type="checkbox"]) {
   width: 100%;
   padding: 0.5rem 0.75rem;
   border: 1px solid var(--color-border);
@@ -76,17 +76,17 @@ input {
   transition: border-color 0.15s;
 }
 
-input:focus {
+input:not([type="checkbox"]):focus {
   outline: none;
   border-color: var(--color-primary);
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
 }
 
-input[aria-invalid='true'] {
+input:not([type="checkbox"])[aria-invalid='true'] {
   border-color: var(--color-error);
 }
 
-input[aria-invalid='true']:focus {
+input:not([type="checkbox"])[aria-invalid='true']:focus {
   box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.1);
 }
 
