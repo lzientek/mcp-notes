@@ -12,6 +12,7 @@ import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
 import * as origins from 'aws-cdk-lib/aws-cloudfront-origins';
 import * as s3deploy from 'aws-cdk-lib/aws-s3-deployment';
 import * as logs from 'aws-cdk-lib/aws-logs';
+import { DynamoEventSource } from 'aws-cdk-lib/aws-lambda-event-sources';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Construct } from 'constructs';
@@ -26,6 +27,7 @@ export class McpNotesStack extends cdk.Stack {
   public readonly tagsTable: dynamodb.Table;
   public readonly sharesTable: dynamodb.Table;
   public readonly foldersTable: dynamodb.Table;
+  public readonly activityTable: dynamodb.Table;
   public readonly api: apigateway.RestApi;
 
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -93,6 +95,7 @@ export class McpNotesStack extends cdk.Stack {
       sortKey: { name: 'noteId', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
+      stream: dynamodb.StreamViewType.NEW_AND_OLD_IMAGES,
     });
 
     // ─── DynamoDB Tags Table ─────────────────────────────────────────────
@@ -126,6 +129,15 @@ export class McpNotesStack extends cdk.Stack {
       sortKey: { name: 'folderId', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
+    });
+
+    // ─── DynamoDB Activity Table ─────────────────────────────────────────
+    this.activityTable = new dynamodb.Table(this, 'McpNotesActivityTable', {
+      partitionKey: { name: 'noteId', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'timestamp', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      timeToLiveAttribute: 'ttl',
     });
 
     // ─── Lambda Functions (Notes CRUD) ───────────────────────────────────
@@ -297,6 +309,35 @@ export class McpNotesStack extends cdk.Stack {
       },
     });
 
+    // ─── Lambda Functions (Activity) ─────────────────────────────────────
+    const processNoteStreamFn = new NodejsFunction(this, 'ProcessNoteStreamFn', {
+      runtime: lambda.Runtime.NODEJS_22_X,
+      entry: path.join(lambdaDir, 'process-note-stream.ts'),
+      handler: 'handler',
+      description: 'Process DynamoDB Stream events to generate activity log',
+      environment: {
+        ACTIVITY_TABLE_NAME: this.activityTable.tableName,
+      },
+    });
+
+    processNoteStreamFn.addEventSource(new DynamoEventSource(this.notesTable, {
+      startingPosition: lambda.StartingPosition.TRIM_HORIZON,
+      batchSize: 10,
+      retryAttempts: 3,
+    }));
+
+    const listActivityFn = new NodejsFunction(this, 'ListActivityFn', {
+      runtime: lambda.Runtime.NODEJS_22_X,
+      entry: path.join(lambdaDir, 'list-activity.ts'),
+      handler: 'handler',
+      description: 'List activity events for a note',
+      environment: {
+        ACTIVITY_TABLE_NAME: this.activityTable.tableName,
+        TABLE_NAME: this.notesTable.tableName,
+        SHARES_TABLE_NAME: this.sharesTable.tableName,
+      },
+    });
+
     // ─── DynamoDB Permissions ────────────────────────────────────────────
     // Notes table
     this.notesTable.grantReadData(listNotesFn);
@@ -337,6 +378,14 @@ export class McpNotesStack extends cdk.Stack {
 
     // Shares table access for bulk delete (cascade)
     this.sharesTable.grantReadWriteData(bulkDeleteNotesFn);
+
+    // Activity table
+    this.activityTable.grantReadWriteData(processNoteStreamFn);
+    this.activityTable.grantReadData(listActivityFn);
+
+    // List activity needs read access to notes and shares for auth check
+    this.notesTable.grantReadData(listActivityFn);
+    this.sharesTable.grantReadData(listActivityFn);
 
     // ─── API Gateway ─────────────────────────────────────────────────────
     this.api = new apigateway.RestApi(this, 'McpNotesApi', {
@@ -468,6 +517,14 @@ export class McpNotesStack extends cdk.Stack {
     bulkDelete.addMethod(
       'POST',
       new apigateway.LambdaIntegration(bulkDeleteNotesFn),
+      authorizationOptions,
+    );
+
+    // /notes/{noteId}/activity
+    const noteActivity = singleNote.addResource('activity');
+    noteActivity.addMethod(
+      'GET',
+      new apigateway.LambdaIntegration(listActivityFn),
       authorizationOptions,
     );
 
@@ -669,6 +726,10 @@ function handler(event) {
 
     new cdk.CfnOutput(this, 'FoldersTableName', {
       value: this.foldersTable.tableName,
+    });
+
+    new cdk.CfnOutput(this, 'ActivityTableName', {
+      value: this.activityTable.tableName,
     });
 
     new cdk.CfnOutput(this, 'ApiUrl', {

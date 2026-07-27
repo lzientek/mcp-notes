@@ -73,6 +73,7 @@ export const handler = async (
     tags: tags.map((t) => t.toLowerCase()),
     isFavorite,
     lastModifiedBy: source,
+    lastModifiedByUser: event.requestContext.authorizer?.claims?.email ?? userId,
     createdAt: now,
     updatedAt: now,
   };

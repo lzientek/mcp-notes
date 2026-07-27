@@ -190,6 +190,7 @@ export const handler = async (
       ? (body.isFavorite !== undefined ? body.isFavorite : (note.isFavorite ?? false))
       : (note.isFavorite ?? false),
     lastModifiedBy: body.source ?? note.lastModifiedBy ?? null,
+    lastModifiedByUser: event.requestContext.authorizer?.claims?.email ?? userId,
     updatedAt: new Date().toISOString(),
   };
 
