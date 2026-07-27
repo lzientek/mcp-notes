@@ -140,6 +140,26 @@ button[type='submit']:disabled {
   font-size: 0.875rem;
 }
 
+.error-alert__message {
+  margin: 0;
+}
+
+.error-alert__details {
+  margin: 0.5rem 0 0;
+  font-size: 0.75rem;
+  color: #7f1d1d;
+  font-family: monospace;
+  word-break: break-all;
+}
+
+.error-alert__request-id {
+  margin: 0.25rem 0 0;
+  font-size: 0.7rem;
+  color: #991b1b;
+  font-family: monospace;
+  opacity: 0.8;
+}
+
 .success {
   text-align: center;
 }

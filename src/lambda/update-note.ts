@@ -1,12 +1,13 @@
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { CORS_HEADERS } from './helpers/cors.js';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, PutCommand, GetCommand } from '@aws-sdk/lib-dynamodb';
+import { DynamoDBDocumentClient, PutCommand, GetCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
 import { validateTags } from './helpers/validate-tags.js';
 
 const client = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const TABLE_NAME = process.env.TABLE_NAME!;
 const TAGS_TABLE_NAME = process.env.TAGS_TABLE_NAME!;
+const SHARES_TABLE_NAME = process.env.SHARES_TABLE_NAME!;
 
 export const handler = async (
   event: APIGatewayProxyEvent,
@@ -52,7 +53,7 @@ export const handler = async (
     };
   }
 
-  // Check note exists and belongs to user
+  // Try to get the note with caller's userId (owner path)
   const existing = await client.send(
     new GetCommand({
       TableName: TABLE_NAME,
@@ -60,29 +61,116 @@ export const handler = async (
     }),
   );
 
-  if (!existing.Item) {
+  let isOwner = true;
+  let note = existing.Item;
+  let sharePermission: string | null = null;
+
+  // If note not found with caller's userId, check if caller is a recipient
+  if (!note) {
+    isOwner = false;
+    const callerEmail = event.requestContext.authorizer?.claims?.email;
+
+    if (!callerEmail) {
+      return {
+        statusCode: 404,
+        headers: { ...CORS_HEADERS },
+        body: JSON.stringify({
+          code: 'NOTE_NOT_FOUND',
+          message: 'The requested note was not found.',
+          remedy: 'Verify the note ID and try again.',
+        }),
+      };
+    }
+
+    // Query Shares table GSI1 (NoteIdIndex) by noteId, filter by recipientEmail
+    const sharesResult = await client.send(
+      new QueryCommand({
+        TableName: SHARES_TABLE_NAME,
+        IndexName: 'NoteIdIndex',
+        KeyConditionExpression: 'noteId = :nid',
+        ExpressionAttributeValues: { ':nid': noteId },
+      }),
+    );
+
+    const shareRecord = (sharesResult.Items ?? []).find(
+      (item) => item.recipientEmail === callerEmail,
+    );
+
+    if (!shareRecord) {
+      return {
+        statusCode: 404,
+        headers: { ...CORS_HEADERS },
+        body: JSON.stringify({
+          code: 'NOTE_NOT_FOUND',
+          message: 'The requested note was not found.',
+          remedy: 'Verify the note ID and try again.',
+        }),
+      };
+    }
+
+    sharePermission = shareRecord.permission as string;
+
+    // Check permission level
+    if (sharePermission === 'read') {
+      return {
+        statusCode: 403,
+        headers: { ...CORS_HEADERS },
+        body: JSON.stringify({
+          code: 'INSUFFICIENT_PERMISSIONS',
+          message: 'You only have read access to this note.',
+          remedy: 'Contact the note owner to request write access.',
+        }),
+      };
+    }
+
+    // permission === 'write': fetch the actual note using the owner's userId
+    const ownerUserId = shareRecord.userId as string;
+    const noteResult = await client.send(
+      new GetCommand({
+        TableName: TABLE_NAME,
+        Key: { userId: ownerUserId, noteId },
+      }),
+    );
+
+    note = noteResult.Item;
+    if (!note) {
+      return {
+        statusCode: 404,
+        headers: { ...CORS_HEADERS },
+        body: JSON.stringify({
+          code: 'NOTE_NOT_FOUND',
+          message: 'The requested note was not found.',
+          remedy: 'Verify the note ID and try again.',
+        }),
+      };
+    }
+  }
+
+  // For write-recipients, reject isFavorite changes
+  if (!isOwner && body.isFavorite !== undefined) {
     return {
-      statusCode: 404,
+      statusCode: 403,
       headers: { ...CORS_HEADERS },
       body: JSON.stringify({
-        code: 'NOTE_NOT_FOUND',
-        message: 'The requested note was not found.',
-        remedy: 'Verify the note ID and try again.',
+        code: 'INSUFFICIENT_PERMISSIONS',
+        message: 'You cannot change the favorite status of a shared note.',
+        remedy: 'Only the note owner can modify the favorite status.',
       }),
     };
   }
 
   // Validate tags if provided
+  const noteOwnerUserId = note.userId as string;
   let tags: string[] | undefined;
   if (body.tags !== undefined) {
     tags = body.tags.map((t) => t.toLowerCase());
     if (tags.length > 0) {
-      const validation = await validateTags(client, TAGS_TABLE_NAME, userId, tags);
+      const validation = await validateTags(client, TAGS_TABLE_NAME, noteOwnerUserId, tags);
       if (!validation.valid) {
         return {
-      statusCode: 400,
-      headers: { ...CORS_HEADERS },
-      body: JSON.stringify({
+          statusCode: 400,
+          headers: { ...CORS_HEADERS },
+          body: JSON.stringify({
             code: 'INVALID_TAGS',
             message: 'Some tags do not exist.',
             invalidTags: validation.invalidTags,
@@ -93,11 +181,13 @@ export const handler = async (
   }
 
   const updatedNote = {
-    ...existing.Item,
-    title: body.title ?? existing.Item.title,
-    content: body.content ?? existing.Item.content,
-    tags: tags !== undefined ? tags : (existing.Item.tags ?? []),
-    isFavorite: body.isFavorite !== undefined ? body.isFavorite : (existing.Item.isFavorite ?? false),
+    ...note,
+    title: body.title ?? note.title,
+    content: body.content ?? note.content,
+    tags: tags !== undefined ? tags : (note.tags ?? []),
+    isFavorite: isOwner
+      ? (body.isFavorite !== undefined ? body.isFavorite : (note.isFavorite ?? false))
+      : (note.isFavorite ?? false),
     updatedAt: new Date().toISOString(),
   };
 
@@ -106,7 +196,7 @@ export const handler = async (
       TableName: TABLE_NAME,
       Item: updatedNote,
       ConditionExpression: 'userId = :uid',
-      ExpressionAttributeValues: { ':uid': userId },
+      ExpressionAttributeValues: { ':uid': noteOwnerUserId },
     }),
   );
 

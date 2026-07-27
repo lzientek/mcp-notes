@@ -1,9 +1,11 @@
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, QueryCommand } from '@aws-sdk/lib-dynamodb';
+import { DynamoDBDocumentClient, QueryCommand, BatchGetCommand } from '@aws-sdk/lib-dynamodb';
 import { CORS_HEADERS } from './helpers/cors.js';
+
 const client = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const TABLE_NAME = process.env.TABLE_NAME!;
+const SHARES_TABLE_NAME = process.env.SHARES_TABLE_NAME!;
 
 export const handler = async (
   event: APIGatewayProxyEvent,
@@ -29,20 +31,104 @@ export const handler = async (
   const fromDate = params.from ?? null;
   const toDate = params.to ?? null;
   const favoritesOnly = params.favorites === 'true';
+  const scope = params.scope ?? 'own';
 
-  // Build query — we always query by userId (partition key)
-  // Filtering is done in-memory after query since DynamoDB filter expressions
-  // on lists and contains are limited. For a personal notes app (<1000 notes), this is fine.
-  const result = await client.send(
-    new QueryCommand({
-      TableName: TABLE_NAME,
-      KeyConditionExpression: 'userId = :uid',
-      ExpressionAttributeValues: { ':uid': userId },
-      ...(cursor ? { ExclusiveStartKey: { userId, noteId: cursor } } : {}),
-    }),
-  );
+  // Validate scope parameter
+  if (!['own', 'shared', 'all'].includes(scope)) {
+    return {
+      statusCode: 400,
+      headers: { ...CORS_HEADERS },
+      body: JSON.stringify({
+        code: 'INVALID_REQUEST',
+        message: 'Invalid scope parameter. Must be "own", "shared", or "all".',
+        remedy: 'Use scope=own, scope=shared, or scope=all.',
+      }),
+    };
+  }
 
-  let notes = result.Items ?? [];
+  let ownNotes: Record<string, unknown>[] = [];
+  let sharedNotes: Record<string, unknown>[] = [];
+
+  // Fetch own notes
+  if (scope === 'own' || scope === 'all') {
+    const result = await client.send(
+      new QueryCommand({
+        TableName: TABLE_NAME,
+        KeyConditionExpression: 'userId = :uid',
+        ExpressionAttributeValues: { ':uid': userId },
+        ...(cursor && scope === 'own' ? { ExclusiveStartKey: { userId, noteId: cursor } } : {}),
+      }),
+    );
+    ownNotes = result.Items ?? [];
+  }
+
+  // Fetch shared notes
+  if (scope === 'shared' || scope === 'all') {
+    const callerEmail = event.requestContext.authorizer?.claims?.email;
+    if (callerEmail) {
+      // Query GSI2 (RecipientEmailIndex) for shares with this recipient
+      const sharesResult = await client.send(
+        new QueryCommand({
+          TableName: SHARES_TABLE_NAME,
+          IndexName: 'RecipientEmailIndex',
+          KeyConditionExpression: 'recipientEmail = :email',
+          ExpressionAttributeValues: { ':email': callerEmail },
+        }),
+      );
+
+      const shares = sharesResult.Items ?? [];
+
+      if (shares.length > 0) {
+        // BatchGetItem to fetch the actual notes
+        // DynamoDB BatchGetItem limit is 100 items per call
+        const keys = shares.map((share) => ({
+          userId: share.userId as string,
+          noteId: share.noteId as string,
+        }));
+
+        // Process in chunks of 100
+        for (let i = 0; i < keys.length; i += 100) {
+          const chunk = keys.slice(i, i + 100);
+          const batchResult = await client.send(
+            new BatchGetCommand({
+              RequestItems: {
+                [TABLE_NAME]: { Keys: chunk },
+              },
+            }),
+          );
+
+          const fetchedNotes = batchResult.Responses?.[TABLE_NAME] ?? [];
+
+          // Merge note data with share metadata
+          for (const note of fetchedNotes) {
+            const share = shares.find(
+              (s) => s.noteId === note.noteId && s.userId === note.userId,
+            );
+            if (share) {
+              sharedNotes.push({
+                ...note,
+                isShared: true,
+                ownerId: share.userId as string,
+                permission: share.permission as string,
+                sharedAt: share.createdAt as string,
+              });
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Merge results based on scope
+  let notes: Record<string, unknown>[];
+  if (scope === 'own') {
+    notes = ownNotes;
+  } else if (scope === 'shared') {
+    notes = sharedNotes;
+  } else {
+    // scope === 'all': own notes first, then shared
+    notes = [...ownNotes, ...sharedNotes];
+  }
 
   // Apply filters in-memory
   if (tagsFilter && tagsFilter.length > 0) {

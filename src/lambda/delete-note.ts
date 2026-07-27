@@ -1,10 +1,11 @@
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { CORS_HEADERS } from './helpers/cors.js';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, DeleteCommand } from '@aws-sdk/lib-dynamodb';
+import { DynamoDBDocumentClient, DeleteCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
 
 const client = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const TABLE_NAME = process.env.TABLE_NAME!;
+const SHARES_TABLE_NAME = process.env.SHARES_TABLE_NAME!;
 
 export const handler = async (
   event: APIGatewayProxyEvent,
@@ -35,6 +36,7 @@ export const handler = async (
     };
   }
 
+  // Delete the note
   await client.send(
     new DeleteCommand({
       TableName: TABLE_NAME,
@@ -42,9 +44,29 @@ export const handler = async (
     }),
   );
 
+  // Cascade delete all share records for this note
+  const sharesResult = await client.send(
+    new QueryCommand({
+      TableName: SHARES_TABLE_NAME,
+      IndexName: 'NoteIdIndex',
+      KeyConditionExpression: 'noteId = :nid',
+      ExpressionAttributeValues: { ':nid': noteId },
+    }),
+  );
+
+  const shares = sharesResult.Items ?? [];
+  for (const share of shares) {
+    await client.send(
+      new DeleteCommand({
+        TableName: SHARES_TABLE_NAME,
+        Key: { shareId: share.shareId as string },
+      }),
+    );
+  }
+
   return {
-      statusCode: 204,
-      headers: { ...CORS_HEADERS },
-      body: '',
+    statusCode: 204,
+    headers: { ...CORS_HEADERS },
+    body: '',
   };
 };

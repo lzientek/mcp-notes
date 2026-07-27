@@ -11,6 +11,7 @@ import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
 import * as origins from 'aws-cdk-lib/aws-cloudfront-origins';
 import * as s3deploy from 'aws-cdk-lib/aws-s3-deployment';
+import * as logs from 'aws-cdk-lib/aws-logs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Construct } from 'constructs';
@@ -23,6 +24,7 @@ export class McpNotesStack extends cdk.Stack {
   public readonly userPoolClient: cognito.UserPoolClient;
   public readonly notesTable: dynamodb.Table;
   public readonly tagsTable: dynamodb.Table;
+  public readonly sharesTable: dynamodb.Table;
   public readonly api: apigateway.RestApi;
 
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -55,6 +57,35 @@ export class McpNotesStack extends cdk.Stack {
       accessTokenValidity: cdk.Duration.hours(1),
     });
 
+    // ─── Cognito Logging (userNotification errors → CloudWatch) ──────────
+    const cognitoLogGroup = new logs.LogGroup(this, 'CognitoUserPoolLogs', {
+      logGroupName: `/aws/vendedlogs/cognito/${this.userPool.userPoolId}`,
+      retention: logs.RetentionDays.ONE_MONTH,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+    });
+
+    const cognitoLogDelivery = new cognito.CfnLogDeliveryConfiguration(this, 'CognitoLogDelivery', {
+      userPoolId: this.userPool.userPoolId,
+      logConfigurations: [
+        {
+          eventSource: 'userNotification',
+          logLevel: 'ERROR',
+          cloudWatchLogsConfiguration: {
+            logGroupArn: cdk.Arn.format(
+              {
+                service: 'logs',
+                resource: 'log-group',
+                resourceName: `/aws/vendedlogs/cognito/${this.userPool.userPoolId}`,
+                arnFormat: cdk.ArnFormat.COLON_RESOURCE_NAME,
+              },
+              this,
+            ),
+          },
+        },
+      ],
+    });
+    cognitoLogDelivery.node.addDependency(cognitoLogGroup);
+
     // ─── DynamoDB Notes Table ────────────────────────────────────────────
     this.notesTable = new dynamodb.Table(this, 'McpNotesTable', {
       partitionKey: { name: 'userId', type: dynamodb.AttributeType.STRING },
@@ -71,6 +102,23 @@ export class McpNotesStack extends cdk.Stack {
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
 
+    // ─── DynamoDB Shares Table ───────────────────────────────────────────
+    this.sharesTable = new dynamodb.Table(this, 'McpNotesSharesTable', {
+      partitionKey: { name: 'shareId', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    });
+
+    this.sharesTable.addGlobalSecondaryIndex({
+      indexName: 'NoteIdIndex',
+      partitionKey: { name: 'noteId', type: dynamodb.AttributeType.STRING },
+    });
+
+    this.sharesTable.addGlobalSecondaryIndex({
+      indexName: 'RecipientEmailIndex',
+      partitionKey: { name: 'recipientEmail', type: dynamodb.AttributeType.STRING },
+    });
+
     // ─── Lambda Functions (Notes CRUD) ───────────────────────────────────
     const lambdaDir = path.join(__dirname, '..', 'src', 'lambda');
 
@@ -81,6 +129,7 @@ export class McpNotesStack extends cdk.Stack {
       description: 'List all notes for the authenticated user',
       environment: {
         TABLE_NAME: this.notesTable.tableName,
+        SHARES_TABLE_NAME: this.sharesTable.tableName,
       },
     });
 
@@ -113,6 +162,7 @@ export class McpNotesStack extends cdk.Stack {
       environment: {
         TABLE_NAME: this.notesTable.tableName,
         TAGS_TABLE_NAME: this.tagsTable.tableName,
+        SHARES_TABLE_NAME: this.sharesTable.tableName,
       },
     });
 
@@ -123,6 +173,42 @@ export class McpNotesStack extends cdk.Stack {
       description: 'Delete a note',
       environment: {
         TABLE_NAME: this.notesTable.tableName,
+        SHARES_TABLE_NAME: this.sharesTable.tableName,
+      },
+    });
+
+    // ─── Lambda Functions (Sharing) ──────────────────────────────────────
+    const shareNoteFn = new NodejsFunction(this, 'ShareNoteFn', {
+      runtime: lambda.Runtime.NODEJS_22_X,
+      entry: path.join(lambdaDir, 'share-note.ts'),
+      handler: 'handler',
+      description: 'Create a public link or user share for a note',
+      environment: {
+        TABLE_NAME: this.notesTable.tableName,
+        SHARES_TABLE_NAME: this.sharesTable.tableName,
+        FRONTEND_URL: 'https://www.notlai.com',
+      },
+    });
+
+    const unshareNoteFn = new NodejsFunction(this, 'UnshareNoteFn', {
+      runtime: lambda.Runtime.NODEJS_22_X,
+      entry: path.join(lambdaDir, 'unshare-note.ts'),
+      handler: 'handler',
+      description: 'Revoke a public link or user share',
+      environment: {
+        TABLE_NAME: this.notesTable.tableName,
+        SHARES_TABLE_NAME: this.sharesTable.tableName,
+      },
+    });
+
+    const getSharedNoteFn = new NodejsFunction(this, 'GetSharedNoteFn', {
+      runtime: lambda.Runtime.NODEJS_22_X,
+      entry: path.join(lambdaDir, 'get-shared-note.ts'),
+      handler: 'handler',
+      description: 'Get a shared note by shareId (public, no auth)',
+      environment: {
+        TABLE_NAME: this.notesTable.tableName,
+        SHARES_TABLE_NAME: this.sharesTable.tableName,
       },
     });
 
@@ -173,6 +259,19 @@ export class McpNotesStack extends cdk.Stack {
     this.tagsTable.grantReadWriteData(deleteTagFn);
     this.tagsTable.grantReadData(createNoteFn);
     this.tagsTable.grantReadData(updateNoteFn);
+
+    // Shares table
+    this.sharesTable.grantReadWriteData(shareNoteFn);
+    this.sharesTable.grantReadWriteData(unshareNoteFn);
+    this.sharesTable.grantReadData(getSharedNoteFn);
+    this.sharesTable.grantReadData(listNotesFn);
+    this.sharesTable.grantReadData(updateNoteFn);
+    this.sharesTable.grantReadWriteData(deleteNoteFn);
+
+    // Notes table access for share functions
+    this.notesTable.grantReadData(shareNoteFn);
+    this.notesTable.grantReadData(unshareNoteFn);
+    this.notesTable.grantReadData(getSharedNoteFn);
 
     // ─── API Gateway ─────────────────────────────────────────────────────
     this.api = new apigateway.RestApi(this, 'McpNotesApi', {
@@ -276,6 +375,28 @@ export class McpNotesStack extends cdk.Stack {
       'DELETE',
       new apigateway.LambdaIntegration(deleteTagFn),
       authorizationOptions,
+    );
+
+    // /notes/{noteId}/share
+    const noteShare = singleNote.addResource('share');
+    noteShare.addMethod(
+      'POST',
+      new apigateway.LambdaIntegration(shareNoteFn),
+      authorizationOptions,
+    );
+    noteShare.addMethod(
+      'DELETE',
+      new apigateway.LambdaIntegration(unshareNoteFn),
+      authorizationOptions,
+    );
+
+    // /shared/{shareId} — public, no auth
+    const shared = this.api.root.addResource('shared');
+    const sharedNote = shared.addResource('{shareId}');
+    sharedNote.addMethod(
+      'GET',
+      new apigateway.LambdaIntegration(getSharedNoteFn),
+      // No authorizationOptions — public endpoint
     );
 
     // ─── DNS & Certificates ────────────────────────────────────────────────
@@ -446,6 +567,10 @@ function handler(event) {
 
     new cdk.CfnOutput(this, 'TagsTableName', {
       value: this.tagsTable.tableName,
+    });
+
+    new cdk.CfnOutput(this, 'SharesTableName', {
+      value: this.sharesTable.tableName,
     });
 
     new cdk.CfnOutput(this, 'ApiUrl', {
