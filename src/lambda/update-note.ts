@@ -38,7 +38,7 @@ export const handler = async (
     };
   }
 
-  let body: { title?: string; content?: string; tags?: string[]; folderId?: string | null; isFavorite?: boolean };
+  let body: { title?: string; content?: string; tags?: string[]; folderId?: string | null; isFavorite?: boolean; source?: string };
   try {
     body = JSON.parse(event.body ?? '{}');
   } catch {
@@ -189,6 +189,7 @@ export const handler = async (
     isFavorite: isOwner
       ? (body.isFavorite !== undefined ? body.isFavorite : (note.isFavorite ?? false))
       : (note.isFavorite ?? false),
+    lastModifiedBy: body.source ?? note.lastModifiedBy ?? null,
     updatedAt: new Date().toISOString(),
   };
 

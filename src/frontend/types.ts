@@ -35,6 +35,7 @@ export interface Note {
   tags: string[];
   folderId: string | null;
   isFavorite: boolean;
+  lastModifiedBy: string | null;
   createdAt: string;
   updatedAt: string;
 }

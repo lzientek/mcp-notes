@@ -368,6 +368,26 @@
   gap: 0.4rem;
 }
 
+.note-card-indicators {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.note-card-ai-logo {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+  opacity: 0.7;
+  transition: opacity 0.2s;
+}
+
+.note-card-ai-logo:hover {
+  opacity: 1;
+}
+
 .note-card-star {
   color: #f59e0b;
   font-size: 0.9rem;

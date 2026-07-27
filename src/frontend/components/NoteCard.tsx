@@ -43,11 +43,21 @@ function formatRelativeDate(dateStr: string): string {
   return date.toLocaleDateString('fr-FR');
 }
 
+const AI_LOGOS: Record<string, { src: string; alt: string }> = {
+  claude: { src: '/static/logos/claude.svg', alt: 'Claude' },
+  kiro: { src: '/static/logos/kiro.png', alt: 'Kiro' },
+  cursor: { src: '/static/logos/cursor.svg', alt: 'Cursor' },
+  windsurf: { src: '/static/logos/windsurf.svg', alt: 'Windsurf' },
+};
+
 export function NoteCard({ note, onSelect, isSelectionMode, isSelected, folders }: NoteCardProps) {
   const plain = stripMarkdown(note.content);
   const excerpt = plain.length > 120 ? `${plain.slice(0, 120)}…` : plain;
   const folderName = note.folderId && folders
     ? folders.find((f) => f.folderId === note.folderId)?.name
+    : null;
+  const aiLogo = note.lastModifiedBy
+    ? AI_LOGOS[note.lastModifiedBy.toLowerCase()]
     : null;
 
   return (
@@ -71,7 +81,12 @@ export function NoteCard({ note, onSelect, isSelectionMode, isSelected, folders 
       )}
       <div className="note-card-title-row">
         <h3 className="note-card-title">{note.title}</h3>
-        {note.isFavorite && <span className="note-card-star" aria-label="Favori">★</span>}
+        <div className="note-card-indicators">
+          {aiLogo && (
+            <img src={aiLogo.src} alt={aiLogo.alt} className="note-card-ai-logo" title={`Dernière modification par ${aiLogo.alt}`} />
+          )}
+          {note.isFavorite && <span className="note-card-star" aria-label="Favori">★</span>}
+        </div>
       </div>
       <p className="note-card-excerpt">{excerpt}</p>
       <div className="note-card-meta">
