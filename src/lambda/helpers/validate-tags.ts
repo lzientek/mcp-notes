@@ -1,5 +1,5 @@
 import type { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
-import { QueryCommand } from '@aws-sdk/lib-dynamodb';
+import { BatchGetCommand } from '@aws-sdk/lib-dynamodb';
 
 export interface ValidateTagsResult {
   valid: boolean;
@@ -16,21 +16,25 @@ export async function validateTags(
     return { valid: true };
   }
 
+  const normalizedNames = tagNames.map((n) => n.toLowerCase());
+
+  // Direct key lookups — tagId IS the name
+  const keys = normalizedNames.map((name) => ({ userId, tagId: name }));
+
+  // BatchGetItem (max 100 keys per call, fine for tags)
   const result = await client.send(
-    new QueryCommand({
-      TableName: tagsTableName,
-      KeyConditionExpression: 'userId = :uid',
-      ExpressionAttributeValues: { ':uid': userId },
+    new BatchGetCommand({
+      RequestItems: {
+        [tagsTableName]: { Keys: keys },
+      },
     }),
   );
 
-  const existingNames = new Set(
-    (result.Items ?? []).map((item) => item.name as string),
+  const foundNames = new Set(
+    (result.Responses?.[tagsTableName] ?? []).map((item) => item.tagId as string),
   );
 
-  const invalidTags = tagNames.filter(
-    (name) => !existingNames.has(name.toLowerCase()),
-  );
+  const invalidTags = normalizedNames.filter((name) => !foundNames.has(name));
 
   if (invalidTags.length > 0) {
     return { valid: false, invalidTags };

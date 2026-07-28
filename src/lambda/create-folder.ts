@@ -1,8 +1,7 @@
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { CORS_HEADERS } from './helpers/cors.js';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, QueryCommand, PutCommand } from '@aws-sdk/lib-dynamodb';
-import { ulid } from 'ulid';
+import { DynamoDBDocumentClient, GetCommand, PutCommand } from '@aws-sdk/lib-dynamodb';
 
 const client = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const FOLDERS_TABLE_NAME = process.env.FOLDERS_TABLE_NAME!;
@@ -51,20 +50,17 @@ export const handler = async (
     };
   }
 
-  // Check uniqueness
+  const folderId = name.toLowerCase();
+
+  // Check uniqueness via direct key lookup
   const existing = await client.send(
-    new QueryCommand({
+    new GetCommand({
       TableName: FOLDERS_TABLE_NAME,
-      KeyConditionExpression: 'userId = :uid',
-      ExpressionAttributeValues: { ':uid': userId },
+      Key: { userId, folderId },
     }),
   );
 
-  const duplicate = (existing.Items ?? []).find(
-    (item) => (item.name as string).toLowerCase() === name.toLowerCase(),
-  );
-
-  if (duplicate) {
+  if (existing.Item) {
     return {
       statusCode: 409,
       headers: { ...CORS_HEADERS },
@@ -76,7 +72,6 @@ export const handler = async (
     };
   }
 
-  const folderId = ulid();
   const now = new Date().toISOString();
 
   const folder = { userId, folderId, name, createdAt: now };
