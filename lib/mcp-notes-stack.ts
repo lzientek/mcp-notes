@@ -345,6 +345,8 @@ export class McpNotesStack extends cdk.Stack {
       description: 'Get content diff for a specific activity event',
       environment: {
         ACTIVITY_TABLE_NAME: this.activityTable.tableName,
+        TABLE_NAME: this.notesTable.tableName,
+        SHARES_TABLE_NAME: this.sharesTable.tableName,
       },
     });
 
@@ -399,6 +401,8 @@ export class McpNotesStack extends cdk.Stack {
 
     // Get activity diff
     this.activityTable.grantReadData(getActivityDiffFn);
+    this.notesTable.grantReadData(getActivityDiffFn);
+    this.sharesTable.grantReadData(getActivityDiffFn);
 
     // ─── API Gateway ─────────────────────────────────────────────────────
     this.api = new apigateway.RestApi(this, 'McpNotesApi', {
