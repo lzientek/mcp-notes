@@ -18,13 +18,13 @@ describe('SuccessMessage', () => {
 
   it('affiche le compteur de redirection', () => {
     render(<SuccessMessage />);
-    expect(screen.getByText(/Redirection dans 3 secondes/)).toBeInTheDocument();
+    expect(screen.getByText(/Redirection dans 3 seconde/)).toBeInTheDocument();
   });
 
-  it('affiche un lien de redirection immédiate', () => {
+  it('affiche un lien vers la configuration', () => {
     render(<SuccessMessage />);
-    const link = screen.getByRole('link', { name: /connexion/i });
-    expect(link).toHaveAttribute('href', '/login');
+    const link = screen.getByRole('link', { name: /configurer/i });
+    expect(link).toHaveAttribute('href', '/setup');
   });
 
   it('a role="alert" pour les lecteurs d\'écran', () => {

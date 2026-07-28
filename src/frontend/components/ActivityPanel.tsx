@@ -144,7 +144,7 @@ export function ActivityPanel({ noteId }: ActivityPanelProps) {
               </div>
               <div className="activity-event-content">
                 <span className="activity-event-text">
-                  <strong>{aiLogo?.alt ?? actor}</strong> {formatAction(event)}
+                  <strong>{aiLogo ? `${aiLogo.alt} (${actor})` : actor}</strong> {formatAction(event)}
                   {hasDiff && (
                     <button
                       type="button"

@@ -17,7 +17,12 @@ describe('validateTags', () => {
 
   it('returns valid when all tags exist', async () => {
     mockSend.mockResolvedValueOnce({
-      Items: [{ name: 'work' }, { name: 'personal' }],
+      Responses: {
+        TagsTable: [
+          { userId: 'user1', tagId: 'work' },
+          { userId: 'user1', tagId: 'personal' },
+        ],
+      },
     });
 
     const result = await validateTags(mockClient, 'TagsTable', 'user1', ['work', 'personal']);
@@ -26,7 +31,11 @@ describe('validateTags', () => {
 
   it('returns invalid with list of missing tags', async () => {
     mockSend.mockResolvedValueOnce({
-      Items: [{ name: 'work' }],
+      Responses: {
+        TagsTable: [
+          { userId: 'user1', tagId: 'work' },
+        ],
+      },
     });
 
     const result = await validateTags(mockClient, 'TagsTable', 'user1', ['work', 'nonexistent']);
@@ -35,7 +44,11 @@ describe('validateTags', () => {
 
   it('is case-insensitive on tag names', async () => {
     mockSend.mockResolvedValueOnce({
-      Items: [{ name: 'work' }],
+      Responses: {
+        TagsTable: [
+          { userId: 'user1', tagId: 'work' },
+        ],
+      },
     });
 
     const result = await validateTags(mockClient, 'TagsTable', 'user1', ['Work']);
@@ -43,7 +56,11 @@ describe('validateTags', () => {
   });
 
   it('returns invalid when no items in DB', async () => {
-    mockSend.mockResolvedValueOnce({ Items: [] });
+    mockSend.mockResolvedValueOnce({
+      Responses: {
+        TagsTable: [],
+      },
+    });
 
     const result = await validateTags(mockClient, 'TagsTable', 'user1', ['anything']);
     expect(result).toEqual({ valid: false, invalidTags: ['anything'] });

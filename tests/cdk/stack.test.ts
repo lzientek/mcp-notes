@@ -18,16 +18,6 @@ describe('McpNotes CDK Stack', () => {
         },
       });
     });
-
-    it('has PreSignUp Lambda trigger attached', () => {
-      template.hasResourceProperties('AWS::Cognito::UserPool', {
-        LambdaConfig: {
-          PreSignUp: Match.objectLike({
-            'Fn::GetAtt': Match.anyValue(),
-          }),
-        },
-      });
-    });
   });
 
   describe('Cognito User Pool Client', () => {
@@ -89,14 +79,14 @@ describe('McpNotes CDK Stack', () => {
       });
     });
 
-    it('creates at least 6 Lambda functions (5 CRUD + 1 PreSignUp)', () => {
+    it('creates at least 6 Lambda functions (5 CRUD + stream processor)', () => {
       const functions = template.findResources('AWS::Lambda::Function');
       expect(Object.keys(functions).length).toBeGreaterThanOrEqual(6);
     });
 
-    it('all CRUD Lambda functions use nodejs20.x runtime', () => {
+    it('all CRUD Lambda functions use nodejs22.x runtime', () => {
       template.hasResourceProperties('AWS::Lambda::Function', {
-        Runtime: 'nodejs20.x',
+        Runtime: 'nodejs22.x',
         Handler: Match.stringLikeRegexp('.*\\.handler'),
       });
     });
