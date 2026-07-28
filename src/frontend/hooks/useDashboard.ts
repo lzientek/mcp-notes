@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { fetchNotes } from '../services/notes-service.js';
 import { fetchTags } from '../services/tags-service.js';
-import { fetchFolders, createFolder as apiCreateFolder, deleteFolder as apiDeleteFolder } from '../services/folders-service.js';
+import { fetchFolders, createFolder as apiCreateFolder } from '../services/folders-service.js';
 import type { Note, Tag, Folder, NotesFilters } from '../types.js';
 
 export function useDashboard() {
@@ -77,17 +77,6 @@ export function useDashboard() {
     }
   }, [loadFolders]);
 
-  const deleteFolder = useCallback(async (folderId: string) => {
-    try {
-      await apiDeleteFolder(folderId);
-      await loadFolders();
-      // Refresh notes in case some were in that folder
-      loadNotes(filters);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Erreur lors de la suppression du dossier');
-    }
-  }, [loadFolders, loadNotes, filters]);
-
   return {
     notes,
     tags,
@@ -100,6 +89,5 @@ export function useDashboard() {
     loadMore,
     refresh,
     createFolder,
-    deleteFolder,
   };
 }

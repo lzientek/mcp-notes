@@ -14,7 +14,7 @@ interface DashboardProps {
 }
 
 export function Dashboard({ onSelectNote }: DashboardProps) {
-  const { notes, tags, folders, nextCursor, isLoading, error, applyFilters, loadMore, refresh, createFolder, deleteFolder } =
+  const { notes, tags, folders, nextCursor, isLoading, error, applyFilters, loadMore, refresh, createFolder } =
     useDashboard();
 
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
@@ -152,7 +152,6 @@ export function Dashboard({ onSelectNote }: DashboardProps) {
           selectedFolderId={selectedFolderId}
           onFilterChange={handleFolderFilter}
           onCreateFolder={createFolder}
-          onDeleteFolder={deleteFolder}
         />
         <TagFilter tags={tags} selectedTags={selectedTags} onFilterChange={handleTagFilter} />
         <DateFilter onFilterChange={handleDateFilter} />

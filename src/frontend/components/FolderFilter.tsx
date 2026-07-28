@@ -6,7 +6,6 @@ interface FolderFilterProps {
   selectedFolderId: string | null;
   onFilterChange: (folderId: string | null) => void;
   onCreateFolder: (name: string) => void;
-  onDeleteFolder: (folderId: string) => void;
 }
 
 export function FolderFilter({
@@ -14,7 +13,6 @@ export function FolderFilter({
   selectedFolderId,
   onFilterChange,
   onCreateFolder,
-  onDeleteFolder,
 }: FolderFilterProps) {
   const [isCreating, setIsCreating] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
@@ -60,28 +58,15 @@ export function FolderFilter({
           Sans dossier
         </button>
         {folders.map((folder) => (
-          <span key={folder.folderId} className="folder-chip-wrapper">
-            <button
-              type="button"
-              className={`folder-chip ${selectedFolderId === folder.folderId ? 'active' : ''}`}
-              onClick={() => onFilterChange(folder.folderId)}
-              aria-pressed={selectedFolderId === folder.folderId}
-            >
-              📁 {folder.name}
-            </button>
-            <button
-              type="button"
-              className="folder-delete-btn"
-              onClick={(e) => {
-                e.stopPropagation();
-                onDeleteFolder(folder.folderId);
-              }}
-              aria-label={`Supprimer le dossier ${folder.name}`}
-              title="Supprimer"
-            >
-              ×
-            </button>
-          </span>
+          <button
+            key={folder.folderId}
+            type="button"
+            className={`folder-chip ${selectedFolderId === folder.folderId ? 'active' : ''}`}
+            onClick={() => onFilterChange(folder.folderId)}
+            aria-pressed={selectedFolderId === folder.folderId}
+          >
+            📁 {folder.name}
+          </button>
         ))}
       </div>
 
