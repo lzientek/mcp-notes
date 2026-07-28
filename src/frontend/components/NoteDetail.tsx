@@ -22,6 +22,26 @@ export function NoteDetail({ noteId, onBack }: NoteDetailProps) {
   const [error, setError] = useState<string | null>(null);
   const [togglingFav, setTogglingFav] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const handleCopyMarkdown = useCallback(async () => {
+    if (!note) return;
+    try {
+      await navigator.clipboard.writeText(note.content);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Fallback for older browsers
+      const textarea = document.createElement('textarea');
+      textarea.value = note.content;
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textarea);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  }, [note]);
 
   useEffect(() => {
     let cancelled = false;
@@ -111,6 +131,24 @@ export function NoteDetail({ noteId, onBack }: NoteDetailProps) {
                 <polyline points="16 6 12 2 8 6" />
                 <line x1="12" y1="2" x2="12" y2="15" />
               </svg>
+            </button>
+            <button
+              type="button"
+              className={`copy-md-btn ${copied ? 'copied' : ''}`}
+              onClick={handleCopyMarkdown}
+              title="Copier le contenu en Markdown"
+              aria-label="Copier le contenu en Markdown"
+            >
+              {copied ? (
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+              ) : (
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                </svg>
+              )}
             </button>
           </div>
           {note.tags.length > 0 && (

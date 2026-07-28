@@ -1420,3 +1420,30 @@
   background: #eef2ff;
   transform: scale(1.1);
 }
+
+
+/* ─── Copy Markdown Button in NoteDetail ─────────────────────────── */
+.copy-md-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #9ca3af;
+  transition: all 0.2s;
+  padding: 0.3rem;
+  line-height: 1;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+}
+
+.copy-md-btn:hover {
+  color: #6366f1;
+  background: #eef2ff;
+  transform: scale(1.1);
+}
+
+.copy-md-btn.copied {
+  color: #10b981;
+}
