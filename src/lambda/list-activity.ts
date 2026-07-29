@@ -85,7 +85,9 @@ export const handler = async (
     new QueryCommand({
       TableName: ACTIVITY_TABLE_NAME,
       KeyConditionExpression: 'noteId = :nid',
-      ExpressionAttributeValues: { ':nid': noteId },
+      FilterExpression: 'NOT begins_with(#ts, :diffPrefix)',
+      ExpressionAttributeNames: { '#ts': 'timestamp' },
+      ExpressionAttributeValues: { ':nid': noteId, ':diffPrefix': 'diff#' },
       ScanIndexForward: false, // newest first
       Limit: limit,
       ...(cursor ? { ExclusiveStartKey: { noteId, timestamp: cursor } } : {}),
