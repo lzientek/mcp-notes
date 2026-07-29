@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { fetchActivity, type ActivityEvent, type DiffHunk } from '../services/activity-service.js';
+import { fetchActivity, fetchActivityDiff, type ActivityEvent, type DiffHunk } from '../services/activity-service.js';
 
 interface ActivityPanelProps {
   noteId: string;
@@ -65,34 +65,12 @@ function formatRelativeDate(timestamp: string): string {
   return date.toLocaleDateString('fr-FR');
 }
 
-function DiffView({ hunks }: { hunks: DiffHunk[] }) {
-  return (
-    <div className="activity-diff">
-      {hunks.map((hunk, hi) => (
-        <div key={hi} className="activity-diff-hunk">
-          {hunk.lines.map((line, li) => (
-            <div
-              key={li}
-              className={`activity-diff-line activity-diff-line-${line.type}`}
-            >
-              <span className="activity-diff-prefix">
-                {line.type === 'add' ? '+' : line.type === 'remove' ? '-' : ' '}
-              </span>
-              <span>{line.content}</span>
-            </div>
-          ))}
-        </div>
-      ))}
-    </div>
-  );
-}
-
 export function ActivityPanel({ noteId }: ActivityPanelProps) {
   const [events, setEvents] = useState<ActivityEvent[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
-  const [collapsedDiffs, setCollapsedDiffs] = useState<Set<string>>(new Set());
+  const [expandedDiffs, setExpandedDiffs] = useState<Record<string, DiffHunk[] | 'loading' | 'expired'>>({});
 
   const load = useCallback(async (cursor?: string) => {
     setIsLoading(true);
@@ -112,17 +90,24 @@ export function ActivityPanel({ noteId }: ActivityPanelProps) {
     load();
   }, [load]);
 
-  const toggleDiff = useCallback((timestamp: string) => {
-    setCollapsedDiffs((prev) => {
-      const next = new Set(prev);
-      if (next.has(timestamp)) {
-        next.delete(timestamp);
-      } else {
-        next.add(timestamp);
-      }
-      return next;
-    });
-  }, []);
+  const toggleDiff = useCallback(async (timestamp: string) => {
+    if (expandedDiffs[timestamp]) {
+      setExpandedDiffs((prev) => {
+        const next = { ...prev };
+        delete next[timestamp];
+        return next;
+      });
+      return;
+    }
+
+    setExpandedDiffs((prev) => ({ ...prev, [timestamp]: 'loading' }));
+    try {
+      const result = await fetchActivityDiff(noteId, timestamp);
+      setExpandedDiffs((prev) => ({ ...prev, [timestamp]: result.hunks }));
+    } catch {
+      setExpandedDiffs((prev) => ({ ...prev, [timestamp]: 'expired' }));
+    }
+  }, [noteId, expandedDiffs]);
 
   if (!loaded && isLoading) {
     return (
@@ -143,8 +128,8 @@ export function ActivityPanel({ noteId }: ActivityPanelProps) {
         {events.map((event) => {
           const aiLogo = event.source ? AI_LOGOS[event.source.toLowerCase()] : null;
           const actor = event.actorEmail ?? 'Utilisateur';
-          const hasDiff = !!event.diff && event.diff.length > 0;
-          const isDiffCollapsed = collapsedDiffs.has(event.timestamp);
+          const hasDiff = event.action === 'content_updated' && (event.details as Record<string, unknown> | null)?.hasDiff;
+          const diffState = expandedDiffs[event.timestamp];
 
           return (
             <li key={event.timestamp} className="activity-event">
@@ -164,11 +149,31 @@ export function ActivityPanel({ noteId }: ActivityPanelProps) {
                       className="activity-diff-toggle"
                       onClick={() => toggleDiff(event.timestamp)}
                     >
-                      {isDiffCollapsed ? '▸ diff' : '▾ masquer'}
+                      {diffState && diffState !== 'loading' && diffState !== 'expired' ? '▾ masquer' : '▸ diff'}
                     </button>
                   )}
                 </span>
-                {hasDiff && !isDiffCollapsed && <DiffView hunks={event.diff!} />}
+                {diffState === 'loading' && <span className="activity-diff-loading">Chargement…</span>}
+                {diffState === 'expired' && <span className="activity-diff-expired">Diff expiré (&gt; 30j)</span>}
+                {Array.isArray(diffState) && (
+                  <div className="activity-diff">
+                    {diffState.map((hunk, hi) => (
+                      <div key={hi} className="activity-diff-hunk">
+                        {hunk.lines.map((line, li) => (
+                          <div
+                            key={li}
+                            className={`activity-diff-line activity-diff-line-${line.type}`}
+                          >
+                            <span className="activity-diff-prefix">
+                              {line.type === 'add' ? '+' : line.type === 'remove' ? '-' : ' '}
+                            </span>
+                            <span>{line.content}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <time className="activity-event-time">{formatRelativeDate(event.timestamp)}</time>
               </div>
             </li>
