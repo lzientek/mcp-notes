@@ -1,7 +1,7 @@
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { CORS_HEADERS } from './helpers/cors.js';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, QueryCommand, GetCommand } from '@aws-sdk/lib-dynamodb';
+import { DynamoDBDocumentClient, QueryCommand, GetCommand, BatchGetCommand } from '@aws-sdk/lib-dynamodb';
 
 const client = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const ACTIVITY_TABLE_NAME = process.env.ACTIVITY_TABLE_NAME!;
@@ -92,10 +92,44 @@ export const handler = async (
     }),
   );
 
-  const events = result.Items ?? [];
+  const events = (result.Items ?? []) as Record<string, unknown>[];
   const nextCursor = result.LastEvaluatedKey
     ? (result.LastEvaluatedKey.timestamp as string)
     : null;
+
+  // Reconcile diffs: for content_updated events with hasDiff, fetch and inline the diff hunks
+  const diffTimestamps = events
+    .filter((e) => e.action === 'content_updated' && (e.details as Record<string, unknown> | null)?.hasDiff)
+    .map((e) => e.timestamp as string);
+
+  if (diffTimestamps.length > 0) {
+    const diffKeys = diffTimestamps.map((ts) => ({ noteId, timestamp: `diff#${ts}` }));
+
+    // BatchGet supports up to 100 keys — we're limited to 20 events max, so always safe
+    const batchResult = await client.send(
+      new BatchGetCommand({
+        RequestItems: {
+          [ACTIVITY_TABLE_NAME]: { Keys: diffKeys },
+        },
+      }),
+    );
+
+    const diffItems = batchResult.Responses?.[ACTIVITY_TABLE_NAME] ?? [];
+    const diffMap = new Map<string, unknown>();
+    for (const item of diffItems) {
+      // Key is "diff#<original_timestamp>" → extract original timestamp
+      const originalTs = (item.timestamp as string).replace(/^diff#/, '');
+      diffMap.set(originalTs, item.hunks);
+    }
+
+    // Merge hunks into events
+    for (const evt of events) {
+      const hunks = diffMap.get(evt.timestamp as string);
+      if (hunks) {
+        (evt as Record<string, unknown>).diff = hunks;
+      }
+    }
+  }
 
   return {
     statusCode: 200,
