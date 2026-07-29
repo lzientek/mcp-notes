@@ -1,7 +1,7 @@
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { CORS_HEADERS } from './helpers/cors.js';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, QueryCommand, GetCommand, BatchGetCommand } from '@aws-sdk/lib-dynamodb';
+import { DynamoDBDocumentClient, QueryCommand, GetCommand } from '@aws-sdk/lib-dynamodb';
 
 const client = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const ACTIVITY_TABLE_NAME = process.env.ACTIVITY_TABLE_NAME!;
@@ -48,7 +48,6 @@ export const handler = async (
   let hasAccess = !!noteResult.Item;
 
   if (!hasAccess) {
-    // Check if user is a share recipient
     const callerEmail = event.requestContext.authorizer?.claims?.email;
     if (callerEmail) {
       const sharesResult = await client.send(
@@ -81,61 +80,53 @@ export const handler = async (
   const limit = Math.min(Number(params.limit) || 20, 100);
   const cursor = params.cursor;
 
+  // Fetch all items (events + diffs) from the partition
   const result = await client.send(
     new QueryCommand({
       TableName: ACTIVITY_TABLE_NAME,
       KeyConditionExpression: 'noteId = :nid',
-      FilterExpression: 'NOT begins_with(#ts, :diffPrefix)',
-      ExpressionAttributeNames: { '#ts': 'timestamp' },
-      ExpressionAttributeValues: { ':nid': noteId, ':diffPrefix': 'diff#' },
+      ExpressionAttributeValues: { ':nid': noteId },
       ScanIndexForward: false, // newest first
-      Limit: limit,
+      Limit: limit * 2, // fetch extra to account for diff items mixed in
       ...(cursor ? { ExclusiveStartKey: { noteId, timestamp: cursor } } : {}),
     }),
   );
 
-  const events = (result.Items ?? []) as Record<string, unknown>[];
-  const nextCursor = result.LastEvaluatedKey
-    ? (result.LastEvaluatedKey.timestamp as string)
-    : null;
+  const allItems = (result.Items ?? []) as Record<string, unknown>[];
 
-  // Reconcile diffs: for content_updated events with hasDiff, fetch and inline the diff hunks
-  const diffTimestamps = events
-    .filter((e) => e.action === 'content_updated' && (e.details as Record<string, unknown> | null)?.hasDiff)
-    .map((e) => e.timestamp as string);
+  // Separate diff items from activity events
+  const diffMap = new Map<string, unknown>();
+  const events: Record<string, unknown>[] = [];
 
-  if (diffTimestamps.length > 0) {
-    const diffKeys = diffTimestamps.map((ts) => ({ noteId, timestamp: `diff#${ts}` }));
-
-    // BatchGet supports up to 100 keys — we're limited to 20 events max, so always safe
-    const batchResult = await client.send(
-      new BatchGetCommand({
-        RequestItems: {
-          [ACTIVITY_TABLE_NAME]: { Keys: diffKeys },
-        },
-      }),
-    );
-
-    const diffItems = batchResult.Responses?.[ACTIVITY_TABLE_NAME] ?? [];
-    const diffMap = new Map<string, unknown>();
-    for (const item of diffItems) {
-      // Key is "diff#<original_timestamp>" → extract original timestamp
-      const originalTs = (item.timestamp as string).replace(/^diff#/, '');
+  for (const item of allItems) {
+    const ts = item.timestamp as string;
+    if (ts.startsWith('diff#')) {
+      const originalTs = ts.replace(/^diff#/, '');
       diffMap.set(originalTs, item.hunks);
-    }
-
-    // Merge hunks into events
-    for (const evt of events) {
-      const hunks = diffMap.get(evt.timestamp as string);
-      if (hunks) {
-        (evt as Record<string, unknown>).diff = hunks;
-      }
+    } else {
+      events.push(item);
     }
   }
+
+  // Reconcile: inline diff hunks into their corresponding content_updated events
+  for (const evt of events) {
+    const hunks = diffMap.get(evt.timestamp as string);
+    if (hunks) {
+      evt.diff = hunks;
+    }
+  }
+
+  // Apply the requested limit (we fetched extra to account for diff items)
+  const trimmedEvents = events.slice(0, limit);
+
+  // Compute cursor from the last event actually returned
+  const nextCursor = trimmedEvents.length >= limit && result.LastEvaluatedKey
+    ? (trimmedEvents[trimmedEvents.length - 1].timestamp as string)
+    : null;
 
   return {
     statusCode: 200,
     headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
-    body: JSON.stringify({ events, nextCursor }),
+    body: JSON.stringify({ events: trimmedEvents, nextCursor }),
   };
 };
