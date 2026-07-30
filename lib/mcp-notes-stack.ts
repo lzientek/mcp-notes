@@ -172,6 +172,7 @@ export class McpNotesStack extends cdk.Stack {
       description: 'Get a specific note by ID',
       environment: {
         TABLE_NAME: this.notesTable.tableName,
+        SHARES_TABLE_NAME: this.sharesTable.tableName,
       },
     });
 
@@ -371,6 +372,7 @@ export class McpNotesStack extends cdk.Stack {
     this.sharesTable.grantReadWriteData(unshareNoteFn);
     this.sharesTable.grantReadData(getSharedNoteFn);
     this.sharesTable.grantReadData(listNotesFn);
+    this.sharesTable.grantReadData(getNoteFn);
     this.sharesTable.grantReadData(updateNoteFn);
     this.sharesTable.grantReadWriteData(deleteNoteFn);
 
