@@ -7,6 +7,14 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text', 'html'],
       include: ['src/**/*.ts', 'lib/**/*.ts'],
+      // A ratchet, not a target: set just under what the suite covers today so
+      // coverage cannot slide back. Raise them as tests are added.
+      thresholds: {
+        statements: 60,
+        branches: 50,
+        functions: 55,
+        lines: 60,
+      },
     },
     projects: [
       {

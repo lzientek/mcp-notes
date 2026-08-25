@@ -50,3 +50,29 @@ jobs:
 
       - name: Build frontend
         run: node scripts/build-frontend.js
+
+  quality:
+    name: Quality (coverage, audit, synth)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: Dependency audit
+        run: npm audit --audit-level=high
+
+      - name: Coverage thresholds
+        run: npm run test:coverage
+
+      # The stack bundles dist/frontend, so it has to exist before synth.
+      - name: Build frontend
+        run: node scripts/build-frontend.js
+
+      - name: CDK synth
+        run: npx cdk synth --quiet
