@@ -19,6 +19,10 @@ export interface McpNotesConfig {
   apiCertificateArn: string;
   /** Origins allowed to call the API, most-canonical first */
   allowedOrigins: string[];
+  /** Where CloudWatch alarms and the budget notification go, when set */
+  alertEmail?: string;
+  /** Monthly spend, in USD, above which the budget notifies */
+  monthlyBudgetUsd: number;
 }
 
 const PROD_CONFIG: McpNotesConfig = {
@@ -31,6 +35,7 @@ const PROD_CONFIG: McpNotesConfig = {
   apiCertificateArn:
     'arn:aws:acm:eu-west-1:171161696369:certificate/ab893409-9541-4092-8ca9-73bad470be95',
   allowedOrigins: ['https://www.notlai.com', 'https://notlai.com'],
+  monthlyBudgetUsd: 20,
 };
 
 /**
@@ -38,12 +43,17 @@ const PROD_CONFIG: McpNotesConfig = {
  * frontend talk to the deployed API:
  *
  *   npx cdk deploy -c devOrigins=http://localhost:5173
+ *
+ * Alarms and the budget notify only when an address is supplied:
+ *
+ *   npx cdk deploy -c alertEmail=you@example.com -c monthlyBudgetUsd=20
  */
 export function resolveConfig(node: Node): McpNotesConfig {
   const devOrigins = node.tryGetContext('devOrigins') as string | undefined;
-  if (!devOrigins) return PROD_CONFIG;
+  const alertEmail = node.tryGetContext('alertEmail') as string | undefined;
+  const budget = node.tryGetContext('monthlyBudgetUsd') as string | undefined;
 
-  const extra = devOrigins
+  const extra = (devOrigins ?? '')
     .split(',')
     .map((origin) => origin.trim())
     .filter(Boolean);
@@ -51,5 +61,7 @@ export function resolveConfig(node: Node): McpNotesConfig {
   return {
     ...PROD_CONFIG,
     allowedOrigins: [...PROD_CONFIG.allowedOrigins, ...extra],
+    ...(alertEmail ? { alertEmail } : {}),
+    ...(budget ? { monthlyBudgetUsd: Number(budget) } : {}),
   };
 }

@@ -196,4 +196,62 @@ describe('McpNotes CDK Stack', () => {
       });
     });
   });
+
+  describe('Monitoring', () => {
+    it('stays within the free tier: 6 alarms and one dashboard', () => {
+      const alarms = template.findResources('AWS::CloudWatch::Alarm');
+      // 2 lambda-error groups + api 5xx + table throttles + DLQ + iterator age
+      expect(Object.keys(alarms)).toHaveLength(6);
+      expect(Object.keys(template.findResources('AWS::CloudWatch::Dashboard'))).toHaveLength(1);
+    });
+
+    it('alarms on a DLQ that stops being empty', () => {
+      template.hasResourceProperties('AWS::CloudWatch::Alarm', {
+        MetricName: 'ApproximateNumberOfMessagesVisible',
+        Threshold: 1,
+        ComparisonOperator: 'GreaterThanOrEqualToThreshold',
+      });
+    });
+
+    it('alarms on a stream falling more than 15 minutes behind', () => {
+      template.hasResourceProperties('AWS::CloudWatch::Alarm', {
+        MetricName: 'IteratorAge',
+        Threshold: 900000,
+      });
+    });
+
+    it('keeps lambda error alarms under the 10-metric expression cap', () => {
+      const alarms = Object.values(template.findResources('AWS::CloudWatch::Alarm'));
+      const mathAlarms = alarms.filter((a: any) => a.Properties.Metrics);
+      for (const a of mathAlarms) {
+        const metrics = (a as any).Properties.Metrics.filter((m: any) => m.MetricStat);
+        expect(metrics.length).toBeLessThanOrEqual(10);
+      }
+    });
+
+    it('creates no SNS topic or budget without an alert address', () => {
+      expect(Object.keys(template.findResources('AWS::SNS::Topic'))).toHaveLength(0);
+      expect(Object.keys(template.findResources('AWS::Budgets::Budget'))).toHaveLength(0);
+    });
+
+    it('wires alarms to email and creates the budget when an address is given', { timeout: 60_000 }, () => {
+      const alertApp = new cdk.App({
+        context: { alertEmail: 'ops@example.com', monthlyBudgetUsd: '25' },
+      });
+      const alertTemplate = Template.fromStack(new McpNotesStack(alertApp, 'AlertStack'));
+
+      alertTemplate.hasResourceProperties('AWS::SNS::Subscription', {
+        Protocol: 'email',
+        Endpoint: 'ops@example.com',
+      });
+      alertTemplate.hasResourceProperties('AWS::Budgets::Budget', {
+        Budget: Match.objectLike({
+          BudgetLimit: { Amount: 25, Unit: 'USD' },
+          TimeUnit: 'MONTHLY',
+        }),
+      });
+      const alarms = Object.values(alertTemplate.findResources('AWS::CloudWatch::Alarm'));
+      expect(alarms.every((a: any) => a.Properties.AlarmActions?.length === 1)).toBe(true);
+    });
+  });
 });

@@ -18,6 +18,7 @@ import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Construct } from 'constructs';
 import { resolveConfig } from './config.js';
+import { addMonitoring } from './monitoring.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -165,14 +166,16 @@ export class McpNotesStack extends cdk.Stack {
     // ─── Lambda Functions (Notes CRUD) ───────────────────────────────────
     const lambdaDir = path.join(__dirname, '..', 'src', 'lambda');
 
+    const allFunctions: NodejsFunction[] = [];
+
     // Same construct id and scope as before — the logical ids do not move.
     const createFunction = (
       functionId: string,
       entryFile: string,
       description: string,
       environment: Record<string, string> = {},
-    ): NodejsFunction =>
-      new NodejsFunction(this, functionId, {
+    ): NodejsFunction => {
+      const fn = new NodejsFunction(this, functionId, {
         runtime: lambda.Runtime.NODEJS_22_X,
         entry: path.join(lambdaDir, entryFile),
         handler: 'handler',
@@ -182,6 +185,9 @@ export class McpNotesStack extends cdk.Stack {
           ...environment,
         },
       });
+      allFunctions.push(fn);
+      return fn;
+    };
 
     const listNotesFn = createFunction('ListNotesFn', 'list-notes.ts', 'List all notes for the authenticated user', {
         TABLE_NAME: this.notesTable.tableName,
@@ -683,6 +689,23 @@ function handler(event) {
       target: route53.RecordTarget.fromAlias(
         new targets.ApiGatewayDomain(apiDomainName),
       ),
+    });
+
+    // ─── Monitoring ──────────────────────────────────────────────────────
+    addMonitoring(this, {
+      api: this.api,
+      functions: allFunctions,
+      streamProcessor: processNoteStreamFn,
+      streamDlq,
+      tables: [
+        this.notesTable,
+        this.tagsTable,
+        this.sharesTable,
+        this.foldersTable,
+        this.activityTable,
+      ],
+      ...(config.alertEmail ? { alertEmail: config.alertEmail } : {}),
+      monthlyBudgetUsd: config.monthlyBudgetUsd,
     });
 
     // ─── Outputs ─────────────────────────────────────────────────────────
