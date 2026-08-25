@@ -27,6 +27,7 @@ export default defineConfig({
             'tests/unit/lambda/**/*.test.ts',
             'tests/unit/frontend/services/**/*.test.ts',
             'tests/unit/frontend/validators/**/*.test.ts',
+            'tests/unit/frontend/styles/**/*.test.ts',
           ],
         },
       },
