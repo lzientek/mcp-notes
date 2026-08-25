@@ -17,6 +17,73 @@ const client = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const TAGS_TABLE_NAME = process.env.TAGS_TABLE_NAME!;
 const TABLE_NAME = process.env.TABLE_NAME!;
 
+/**
+ * Number of times to re-read a note whose tag list shifted under us before
+ * giving up. A conflict needs a concurrent edit of the same note, so more than
+ * a couple of rounds means something else is wrong.
+ */
+const MAX_TAG_REMOVAL_ATTEMPTS = 3;
+
+/**
+ * Strips one tag from a note with REMOVE #tags[i], which rewrites a single list
+ * element instead of the whole item — so a concurrent edit to the note's title
+ * or content is not clobbered.
+ *
+ * The index is only valid for the list we read, so the update is conditioned on
+ * it. If a concurrent edit removed an earlier tag, the indices shift, the
+ * condition fails, and the note is re-read: the tag is still there, just
+ * somewhere else. Treating that as "nothing to repair" would leave the note
+ * carrying a tag whose row is about to be deleted — it would keep rendering in
+ * the UI and break the note's next update, with nothing to ever clean it up.
+ */
+async function removeTagFromNote(
+  userId: string,
+  noteId: string,
+  tagName: string,
+  knownTags: string[] | undefined,
+  now: string,
+): Promise<void> {
+  let tags = knownTags ?? [];
+
+  for (let attempt = 0; attempt < MAX_TAG_REMOVAL_ATTEMPTS; attempt += 1) {
+    const index = tags.indexOf(tagName);
+    if (index === -1) return; // genuinely gone
+
+    try {
+      await client.send(
+        new UpdateCommand({
+          TableName: TABLE_NAME,
+          Key: { userId, noteId },
+          UpdateExpression: `REMOVE #tags[${String(index)}] SET updatedAt = :now`,
+          ConditionExpression: `#tags[${String(index)}] = :tagName`,
+          ExpressionAttributeNames: { '#tags': 'tags' },
+          ExpressionAttributeValues: { ':tagName': tagName, ':now': now },
+        }),
+      );
+      return;
+    } catch (err) {
+      if ((err as { name?: string }).name !== 'ConditionalCheckFailedException') {
+        throw err;
+      }
+      const fresh = await client.send(
+        new GetCommand({
+          TableName: TABLE_NAME,
+          Key: { userId, noteId },
+          ProjectionExpression: '#tags',
+          ExpressionAttributeNames: { '#tags': 'tags' },
+        }),
+      );
+      tags = (fresh.Item?.tags as string[] | undefined) ?? [];
+    }
+  }
+
+  // Better to fail the request — and leave the tag row in place — than to
+  // delete it while notes still reference it.
+  throw new Error(
+    `Could not remove tag "${tagName}" from note ${noteId} after ${String(MAX_TAG_REMOVAL_ATTEMPTS)} attempts`,
+  );
+}
+
 export const handler = withAuth(async (event, { userId }) => {
   const tagId = requirePathParam(event, 'tagId', 'Tag ID');
 
@@ -49,33 +116,10 @@ export const handler = withAuth(async (event, { userId }) => {
     ProjectionExpression: 'noteId, #tags',
   });
 
-  // REMOVE #tags[i] rewrites one list element instead of the whole note. The
-  // condition makes the index safe: if a concurrent edit shifted the list, the
-  // update fails rather than dropping the wrong tag.
   const now = new Date().toISOString();
-  await mapInBatches(affectedNotes, async (note) => {
-    const tags = (note.tags as string[] | undefined) ?? [];
-    const index = tags.indexOf(tagName);
-    if (index === -1) return;
-
-    try {
-      await client.send(
-        new UpdateCommand({
-          TableName: TABLE_NAME,
-          Key: { userId, noteId: note.noteId as string },
-          UpdateExpression: `REMOVE #tags[${index}] SET updatedAt = :now`,
-          ConditionExpression: `#tags[${index}] = :tagName`,
-          ExpressionAttributeNames: { '#tags': 'tags' },
-          ExpressionAttributeValues: { ':tagName': tagName, ':now': now },
-        }),
-      );
-    } catch (err) {
-      // The note changed under us; the tag is gone or moved, nothing to repair.
-      if ((err as { name?: string }).name !== 'ConditionalCheckFailedException') {
-        throw err;
-      }
-    }
-  });
+  await mapInBatches(affectedNotes, (note) =>
+    removeTagFromNote(userId, note.noteId as string, tagName, note.tags as string[] | undefined, now),
+  );
 
   // Delete the tag
   await client.send(

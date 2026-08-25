@@ -87,9 +87,73 @@ describe('delete-tag handler', () => {
     expect(commandsOfType('Update')).toHaveLength(0);
   });
 
-  it('tolerates a concurrent edit that fails the condition', async () => {
+  it('re-reads and retries when a concurrent edit shifted the index', async () => {
+    let updates = 0;
+    let gets = 0;
     mockSend.mockImplementation(async (cmd: any) => {
-      if (cmd.type === 'Get') return { Item: { name: 'work' } };
+      if (cmd.type === 'Get') {
+        gets += 1;
+        // first Get resolves the tag row, later ones re-read the note's tags
+        return gets === 1
+          ? { Item: { userId: 'user-123', tagId: 'work', name: 'work' } }
+          : { Item: { tags: ['work'] } }; // 'admin' was removed, 'work' moved to 0
+      }
+      if (cmd.type === 'Query') return { Items: [{ noteId: 'n1', tags: ['admin', 'work'] }] };
+      if (cmd.type === 'Update') {
+        updates += 1;
+        if (updates === 1) {
+          const err = new Error('condition failed');
+          err.name = 'ConditionalCheckFailedException';
+          throw err;
+        }
+        return {};
+      }
+      return {};
+    });
+
+    const res = await handler(makeEvent());
+    expect(res.statusCode).toBe(204);
+
+    const updateCmds = commandsOfType('Update');
+    expect(updateCmds).toHaveLength(2);
+    expect(updateCmds[0].input.UpdateExpression).toContain('#tags[1]');
+    // recomputed against the re-read list
+    expect(updateCmds[1].input.UpdateExpression).toContain('#tags[0]');
+  });
+
+  it('stops without deleting the tag when the conflict will not clear', async () => {
+    let gets = 0;
+    mockSend.mockImplementation(async (cmd: any) => {
+      if (cmd.type === 'Get') {
+        gets += 1;
+        return gets === 1
+          ? { Item: { userId: 'user-123', tagId: 'work', name: 'work' } }
+          : { Item: { tags: ['work'] } };
+      }
+      if (cmd.type === 'Query') return { Items: [{ noteId: 'n1', tags: ['work'] }] };
+      if (cmd.type === 'Update') {
+        const err = new Error('condition failed');
+        err.name = 'ConditionalCheckFailedException';
+        throw err;
+      }
+      return {};
+    });
+
+    const res = await handler(makeEvent());
+    // 500 rather than a 204 that leaves the note pointing at a deleted tag
+    expect(res.statusCode).toBe(500);
+    expect(commandsOfType('Delete')).toHaveLength(0);
+  });
+
+  it('gives up on a note whose tag really did vanish, without failing', async () => {
+    let gets = 0;
+    mockSend.mockImplementation(async (cmd: any) => {
+      if (cmd.type === 'Get') {
+        gets += 1;
+        return gets === 1
+          ? { Item: { userId: 'user-123', tagId: 'work', name: 'work' } }
+          : { Item: { tags: [] } }; // another request already stripped it
+      }
       if (cmd.type === 'Query') return { Items: [{ noteId: 'n1', tags: ['work'] }] };
       if (cmd.type === 'Update') {
         const err = new Error('condition failed');
@@ -101,6 +165,20 @@ describe('delete-tag handler', () => {
 
     const res = await handler(makeEvent());
     expect(res.statusCode).toBe(204);
+    expect(commandsOfType('Delete')).toHaveLength(1);
+  });
+
+  it('propagates an unexpected DynamoDB error', async () => {
+    mockSend.mockImplementation(async (cmd: any) => {
+      if (cmd.type === 'Get') return { Item: { userId: 'user-123', tagId: 'work', name: 'work' } };
+      if (cmd.type === 'Query') return { Items: [{ noteId: 'n1', tags: ['work'] }] };
+      if (cmd.type === 'Update') throw new Error('ProvisionedThroughputExceeded');
+      return {};
+    });
+
+    const res = await handler(makeEvent());
+    expect(res.statusCode).toBe(500);
+    expect(commandsOfType('Delete')).toHaveLength(0);
   });
 
   it('still deletes the tag itself', async () => {
