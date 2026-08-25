@@ -12,10 +12,13 @@ import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
 import * as origins from 'aws-cdk-lib/aws-cloudfront-origins';
 import * as s3deploy from 'aws-cdk-lib/aws-s3-deployment';
 import * as logs from 'aws-cdk-lib/aws-logs';
-import { DynamoEventSource } from 'aws-cdk-lib/aws-lambda-event-sources';
+import * as sqs from 'aws-cdk-lib/aws-sqs';
+import { DynamoEventSource, SqsDlq } from 'aws-cdk-lib/aws-lambda-event-sources';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Construct } from 'constructs';
+import { resolveConfig } from './config.js';
+import { addMonitoring } from './monitoring.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -32,6 +35,13 @@ export class McpNotesStack extends cdk.Stack {
 
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
+
+    const config = resolveConfig(this.node);
+
+    // Applied to every taggable resource in the stack, for cost attribution.
+    cdk.Tags.of(this).add('Project', 'mcp-notes');
+    cdk.Tags.of(this).add('Environment', 'prod');
+    cdk.Tags.of(this).add('ManagedBy', 'cdk');
 
     // ─── Cognito User Pool ───────────────────────────────────────────────
     this.userPool = new cognito.UserPool(this, 'McpNotesUserPool', {
@@ -94,8 +104,18 @@ export class McpNotesStack extends cdk.Stack {
       partitionKey: { name: 'userId', type: dynamodb.AttributeType.STRING },
       sortKey: { name: 'noteId', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
       removalPolicy: cdk.RemovalPolicy.RETAIN,
       stream: dynamodb.StreamViewType.NEW_AND_OLD_IMAGES,
+    });
+
+    // Lets list-notes page through notes newest-first without reading the whole
+    // partition and sorting in memory.
+    this.notesTable.addGlobalSecondaryIndex({
+      indexName: 'UpdatedAtIndex',
+      partitionKey: { name: 'userId', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'updatedAt', type: dynamodb.AttributeType.STRING },
+      projectionType: dynamodb.ProjectionType.ALL,
     });
 
     // ─── DynamoDB Tags Table ─────────────────────────────────────────────
@@ -103,6 +123,7 @@ export class McpNotesStack extends cdk.Stack {
       partitionKey: { name: 'userId', type: dynamodb.AttributeType.STRING },
       sortKey: { name: 'tagId', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
 
@@ -110,6 +131,7 @@ export class McpNotesStack extends cdk.Stack {
     this.sharesTable = new dynamodb.Table(this, 'McpNotesSharesTable', {
       partitionKey: { name: 'shareId', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
 
@@ -128,6 +150,7 @@ export class McpNotesStack extends cdk.Stack {
       partitionKey: { name: 'userId', type: dynamodb.AttributeType.STRING },
       sortKey: { name: 'folderId', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
 
@@ -143,212 +166,141 @@ export class McpNotesStack extends cdk.Stack {
     // ─── Lambda Functions (Notes CRUD) ───────────────────────────────────
     const lambdaDir = path.join(__dirname, '..', 'src', 'lambda');
 
-    const listNotesFn = new NodejsFunction(this, 'ListNotesFn', {
-      runtime: lambda.Runtime.NODEJS_22_X,
-      entry: path.join(lambdaDir, 'list-notes.ts'),
-      handler: 'handler',
-      description: 'List all notes for the authenticated user',
-      environment: {
+    const allFunctions: NodejsFunction[] = [];
+
+    // Same construct id and scope as before — the logical ids do not move.
+    const createFunction = (
+      functionId: string,
+      entryFile: string,
+      description: string,
+      environment: Record<string, string> = {},
+    ): NodejsFunction => {
+      const fn = new NodejsFunction(this, functionId, {
+        runtime: lambda.Runtime.NODEJS_22_X,
+        entry: path.join(lambdaDir, entryFile),
+        handler: 'handler',
+        description,
+        environment: {
+          ALLOWED_ORIGINS: config.allowedOrigins.join(','),
+          ...environment,
+        },
+      });
+      allFunctions.push(fn);
+      return fn;
+    };
+
+    const listNotesFn = createFunction('ListNotesFn', 'list-notes.ts', 'List all notes for the authenticated user', {
         TABLE_NAME: this.notesTable.tableName,
         SHARES_TABLE_NAME: this.sharesTable.tableName,
-      },
     });
 
-    const createNoteFn = new NodejsFunction(this, 'CreateNoteFn', {
-      runtime: lambda.Runtime.NODEJS_22_X,
-      entry: path.join(lambdaDir, 'create-note.ts'),
-      handler: 'handler',
-      description: 'Create a new note',
-      environment: {
+    const createNoteFn = createFunction('CreateNoteFn', 'create-note.ts', 'Create a new note', {
         TABLE_NAME: this.notesTable.tableName,
         TAGS_TABLE_NAME: this.tagsTable.tableName,
-      },
     });
 
-    const getNoteFn = new NodejsFunction(this, 'GetNoteFn', {
-      runtime: lambda.Runtime.NODEJS_22_X,
-      entry: path.join(lambdaDir, 'get-note.ts'),
-      handler: 'handler',
-      description: 'Get a specific note by ID',
-      environment: {
+    const getNoteFn = createFunction('GetNoteFn', 'get-note.ts', 'Get a specific note by ID', {
         TABLE_NAME: this.notesTable.tableName,
         SHARES_TABLE_NAME: this.sharesTable.tableName,
-      },
     });
 
-    const updateNoteFn = new NodejsFunction(this, 'UpdateNoteFn', {
-      runtime: lambda.Runtime.NODEJS_22_X,
-      entry: path.join(lambdaDir, 'update-note.ts'),
-      handler: 'handler',
-      description: 'Update an existing note',
-      environment: {
+    const updateNoteFn = createFunction('UpdateNoteFn', 'update-note.ts', 'Update an existing note', {
         TABLE_NAME: this.notesTable.tableName,
         TAGS_TABLE_NAME: this.tagsTable.tableName,
         SHARES_TABLE_NAME: this.sharesTable.tableName,
-      },
     });
 
-    const deleteNoteFn = new NodejsFunction(this, 'DeleteNoteFn', {
-      runtime: lambda.Runtime.NODEJS_22_X,
-      entry: path.join(lambdaDir, 'delete-note.ts'),
-      handler: 'handler',
-      description: 'Delete a note',
-      environment: {
+    const deleteNoteFn = createFunction('DeleteNoteFn', 'delete-note.ts', 'Delete a note', {
         TABLE_NAME: this.notesTable.tableName,
         SHARES_TABLE_NAME: this.sharesTable.tableName,
-      },
     });
 
     // ─── Lambda Functions (Sharing) ──────────────────────────────────────
-    const shareNoteFn = new NodejsFunction(this, 'ShareNoteFn', {
-      runtime: lambda.Runtime.NODEJS_22_X,
-      entry: path.join(lambdaDir, 'share-note.ts'),
-      handler: 'handler',
-      description: 'Create a public link or user share for a note',
-      environment: {
+    const shareNoteFn = createFunction('ShareNoteFn', 'share-note.ts', 'Create a public link or user share for a note', {
         TABLE_NAME: this.notesTable.tableName,
         SHARES_TABLE_NAME: this.sharesTable.tableName,
-        FRONTEND_URL: 'https://www.notlai.com',
-      },
+      FRONTEND_URL: config.frontendUrl,
     });
 
-    const unshareNoteFn = new NodejsFunction(this, 'UnshareNoteFn', {
-      runtime: lambda.Runtime.NODEJS_22_X,
-      entry: path.join(lambdaDir, 'unshare-note.ts'),
-      handler: 'handler',
-      description: 'Revoke a public link or user share',
-      environment: {
+    const unshareNoteFn = createFunction('UnshareNoteFn', 'unshare-note.ts', 'Revoke a public link or user share', {
         TABLE_NAME: this.notesTable.tableName,
         SHARES_TABLE_NAME: this.sharesTable.tableName,
-      },
     });
 
-    const getSharedNoteFn = new NodejsFunction(this, 'GetSharedNoteFn', {
-      runtime: lambda.Runtime.NODEJS_22_X,
-      entry: path.join(lambdaDir, 'get-shared-note.ts'),
-      handler: 'handler',
-      description: 'Get a shared note by shareId (public, no auth)',
-      environment: {
+    const getSharedNoteFn = createFunction('GetSharedNoteFn', 'get-shared-note.ts', 'Get a shared note by shareId (public, no auth)', {
         TABLE_NAME: this.notesTable.tableName,
         SHARES_TABLE_NAME: this.sharesTable.tableName,
-      },
     });
 
     // ─── Lambda Functions (Tags CRUD) ────────────────────────────────────
-    const listTagsFn = new NodejsFunction(this, 'ListTagsFn', {
-      runtime: lambda.Runtime.NODEJS_22_X,
-      entry: path.join(lambdaDir, 'list-tags.ts'),
-      handler: 'handler',
-      description: 'List all tags for the authenticated user',
-      environment: {
+    const listTagsFn = createFunction('ListTagsFn', 'list-tags.ts', 'List all tags for the authenticated user', {
         TAGS_TABLE_NAME: this.tagsTable.tableName,
-      },
     });
 
-    const createTagFn = new NodejsFunction(this, 'CreateTagFn', {
-      runtime: lambda.Runtime.NODEJS_22_X,
-      entry: path.join(lambdaDir, 'create-tag.ts'),
-      handler: 'handler',
-      description: 'Create a new tag',
-      environment: {
+    const createTagFn = createFunction('CreateTagFn', 'create-tag.ts', 'Create a new tag', {
         TAGS_TABLE_NAME: this.tagsTable.tableName,
-      },
     });
 
-    const deleteTagFn = new NodejsFunction(this, 'DeleteTagFn', {
-      runtime: lambda.Runtime.NODEJS_22_X,
-      entry: path.join(lambdaDir, 'delete-tag.ts'),
-      handler: 'handler',
-      description: 'Delete a tag and remove it from all notes',
-      environment: {
+    const deleteTagFn = createFunction('DeleteTagFn', 'delete-tag.ts', 'Delete a tag and remove it from all notes', {
         TAGS_TABLE_NAME: this.tagsTable.tableName,
         TABLE_NAME: this.notesTable.tableName,
-      },
     });
 
     // ─── Lambda Functions (Folders CRUD) ─────────────────────────────────
-    const listFoldersFn = new NodejsFunction(this, 'ListFoldersFn', {
-      runtime: lambda.Runtime.NODEJS_22_X,
-      entry: path.join(lambdaDir, 'list-folders.ts'),
-      handler: 'handler',
-      description: 'List all folders for the authenticated user',
-      environment: {
+    const listFoldersFn = createFunction('ListFoldersFn', 'list-folders.ts', 'List all folders for the authenticated user', {
         FOLDERS_TABLE_NAME: this.foldersTable.tableName,
-      },
     });
 
-    const createFolderFn = new NodejsFunction(this, 'CreateFolderFn', {
-      runtime: lambda.Runtime.NODEJS_22_X,
-      entry: path.join(lambdaDir, 'create-folder.ts'),
-      handler: 'handler',
-      description: 'Create a new folder',
-      environment: {
+    const createFolderFn = createFunction('CreateFolderFn', 'create-folder.ts', 'Create a new folder', {
         FOLDERS_TABLE_NAME: this.foldersTable.tableName,
-      },
     });
 
-    const deleteFolderFn = new NodejsFunction(this, 'DeleteFolderFn', {
-      runtime: lambda.Runtime.NODEJS_22_X,
-      entry: path.join(lambdaDir, 'delete-folder.ts'),
-      handler: 'handler',
-      description: 'Delete a folder and move notes back to root',
-      environment: {
+    const deleteFolderFn = createFunction('DeleteFolderFn', 'delete-folder.ts', 'Delete a folder and move notes back to root', {
         FOLDERS_TABLE_NAME: this.foldersTable.tableName,
         TABLE_NAME: this.notesTable.tableName,
-      },
     });
 
     // ─── Lambda Functions (Bulk Operations) ──────────────────────────────
-    const bulkDeleteNotesFn = new NodejsFunction(this, 'BulkDeleteNotesFn', {
-      runtime: lambda.Runtime.NODEJS_22_X,
-      entry: path.join(lambdaDir, 'bulk-delete-notes.ts'),
-      handler: 'handler',
-      description: 'Delete multiple notes at once',
-      environment: {
+    const bulkDeleteNotesFn = createFunction('BulkDeleteNotesFn', 'bulk-delete-notes.ts', 'Delete multiple notes at once', {
         TABLE_NAME: this.notesTable.tableName,
         SHARES_TABLE_NAME: this.sharesTable.tableName,
-      },
     });
 
     // ─── Lambda Functions (Activity) ─────────────────────────────────────
-    const processNoteStreamFn = new NodejsFunction(this, 'ProcessNoteStreamFn', {
-      runtime: lambda.Runtime.NODEJS_22_X,
-      entry: path.join(lambdaDir, 'process-note-stream.ts'),
-      handler: 'handler',
-      description: 'Process DynamoDB Stream events to generate activity log',
-      environment: {
+    const processNoteStreamFn = createFunction('ProcessNoteStreamFn', 'process-note-stream.ts', 'Process DynamoDB Stream events to generate activity log', {
         ACTIVITY_TABLE_NAME: this.activityTable.tableName,
-      },
+    });
+
+    // Without a failure destination, a batch that keeps failing is retried until
+    // the records age out and is then dropped silently — and it blocks the shard
+    // meanwhile. Failed batches land here instead.
+    const streamDlq = new sqs.Queue(this, 'ProcessNoteStreamDlq', {
+      retentionPeriod: cdk.Duration.days(14),
+      enforceSSL: true,
     });
 
     processNoteStreamFn.addEventSource(new DynamoEventSource(this.notesTable, {
       startingPosition: lambda.StartingPosition.TRIM_HORIZON,
       batchSize: 10,
       retryAttempts: 3,
+      // Narrow a failing batch down to the offending record instead of
+      // discarding the nine good ones with it.
+      bisectBatchOnError: true,
+      onFailure: new SqsDlq(streamDlq),
     }));
 
-    const listActivityFn = new NodejsFunction(this, 'ListActivityFn', {
-      runtime: lambda.Runtime.NODEJS_22_X,
-      entry: path.join(lambdaDir, 'list-activity.ts'),
-      handler: 'handler',
-      description: 'List activity events for a note',
-      environment: {
+    streamDlq.grantSendMessages(processNoteStreamFn);
+
+    const listActivityFn = createFunction('ListActivityFn', 'list-activity.ts', 'List activity events for a note', {
         ACTIVITY_TABLE_NAME: this.activityTable.tableName,
         TABLE_NAME: this.notesTable.tableName,
         SHARES_TABLE_NAME: this.sharesTable.tableName,
-      },
     });
 
-    const getActivityDiffFn = new NodejsFunction(this, 'GetActivityDiffFn', {
-      runtime: lambda.Runtime.NODEJS_22_X,
-      entry: path.join(lambdaDir, 'get-activity-diff.ts'),
-      handler: 'handler',
-      description: 'Get content diff for a specific activity event',
-      environment: {
+    const getActivityDiffFn = createFunction('GetActivityDiffFn', 'get-activity-diff.ts', 'Get content diff for a specific activity event', {
         ACTIVITY_TABLE_NAME: this.activityTable.tableName,
         TABLE_NAME: this.notesTable.tableName,
         SHARES_TABLE_NAME: this.sharesTable.tableName,
-      },
     });
 
     // ─── DynamoDB Permissions ────────────────────────────────────────────
@@ -411,7 +363,7 @@ export class McpNotesStack extends cdk.Stack {
       restApiName: 'mcp-notes-api',
       deployOptions: { stageName: 'prod' },
       defaultCorsPreflightOptions: {
-        allowOrigins: ['https://www.notlai.com', 'https://notlai.com'],
+        allowOrigins: config.allowedOrigins,
         allowMethods: apigateway.Cors.ALL_METHODS,
         allowHeaders: ['Content-Type', 'Authorization'],
       },
@@ -434,7 +386,7 @@ export class McpNotesStack extends cdk.Stack {
     this.api.addGatewayResponse('CorsUnauthorized', {
       type: apigateway.ResponseType.UNAUTHORIZED,
       responseHeaders: {
-        'Access-Control-Allow-Origin': "'https://www.notlai.com'",
+        'Access-Control-Allow-Origin': `'${config.allowedOrigins[0]}'`,
         'Access-Control-Allow-Headers': "'Content-Type,Authorization'",
         'Access-Control-Allow-Methods': "'GET,POST,PUT,DELETE,OPTIONS'",
       },
@@ -443,7 +395,7 @@ export class McpNotesStack extends cdk.Stack {
     this.api.addGatewayResponse('CorsAccessDenied', {
       type: apigateway.ResponseType.ACCESS_DENIED,
       responseHeaders: {
-        'Access-Control-Allow-Origin': "'https://www.notlai.com'",
+        'Access-Control-Allow-Origin': `'${config.allowedOrigins[0]}'`,
         'Access-Control-Allow-Headers': "'Content-Type,Authorization'",
         'Access-Control-Allow-Methods': "'GET,POST,PUT,DELETE,OPTIONS'",
       },
@@ -452,7 +404,7 @@ export class McpNotesStack extends cdk.Stack {
     this.api.addGatewayResponse('CorsDefault4xx', {
       type: apigateway.ResponseType.DEFAULT_4XX,
       responseHeaders: {
-        'Access-Control-Allow-Origin': "'https://www.notlai.com'",
+        'Access-Control-Allow-Origin': `'${config.allowedOrigins[0]}'`,
         'Access-Control-Allow-Headers': "'Content-Type,Authorization'",
         'Access-Control-Allow-Methods': "'GET,POST,PUT,DELETE,OPTIONS'",
       },
@@ -582,26 +534,26 @@ export class McpNotesStack extends cdk.Stack {
       this,
       'NotlaiZone',
       {
-        hostedZoneId: 'Z00190361DHV3BI03ZMC5',
-        zoneName: 'notlai.com',
+        hostedZoneId: config.hostedZoneId,
+        zoneName: config.domainName,
       },
     );
 
     const cloudfrontCertificate = acm.Certificate.fromCertificateArn(
       this,
       'CloudFrontCert',
-      'arn:aws:acm:us-east-1:171161696369:certificate/c7e5f78a-4a3a-4c3e-bf97-b3c6b99c8d82',
+      config.cloudFrontCertificateArn,
     );
 
     const apiCertificate = acm.Certificate.fromCertificateArn(
       this,
       'ApiGatewayCert',
-      'arn:aws:acm:eu-west-1:171161696369:certificate/ab893409-9541-4092-8ca9-73bad470be95',
+      config.apiCertificateArn,
     );
 
     // ─── API Gateway Custom Domain ──────────────────────────────────────
     const apiDomainName = new apigateway.DomainName(this, 'ApiDomainName', {
-      domainName: 'api.notlai.com',
+      domainName: config.apiDomainName,
       certificate: apiCertificate,
       endpointType: apigateway.EndpointType.REGIONAL,
       securityPolicy: apigateway.SecurityPolicy.TLS_1_2,
@@ -614,6 +566,15 @@ export class McpNotesStack extends cdk.Stack {
       removalPolicy: cdk.RemovalPolicy.DESTROY,
       autoDeleteObjects: true,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      enforceSSL: true,
+      lifecycleRules: [
+        {
+          // Stale assets are already pruned by BucketDeployment; what lingers
+          // otherwise is the debris of interrupted uploads.
+          id: 'abort-incomplete-uploads',
+          abortIncompleteMultipartUploadAfter: cdk.Duration.days(7),
+        },
+      ],
     });
 
     // CloudFront Function to redirect bare domain to www
@@ -625,12 +586,12 @@ export class McpNotesStack extends cdk.Stack {
 function handler(event) {
   var request = event.request;
   var host = request.headers.host.value;
-  if (host === 'notlai.com') {
+  if (host === '${config.domainName}') {
     return {
       statusCode: 301,
       statusDescription: 'Moved Permanently',
       headers: {
-        location: { value: 'https://www.notlai.com' + request.uri }
+        location: { value: '${config.frontendUrl}' + request.uri }
       }
     };
   }
@@ -656,7 +617,7 @@ function handler(event) {
             },
           ],
         },
-        domainNames: ['www.notlai.com', 'notlai.com'],
+        domainNames: [`www.${config.domainName}`, config.domainName],
         certificate: cloudfrontCertificate,
         defaultRootObject: 'index.html',
         errorResponses: [
@@ -684,7 +645,7 @@ function handler(event) {
     // ─── Route53 DNS Records ─────────────────────────────────────────────
     new route53.ARecord(this, 'WwwARecord', {
       zone: hostedZone,
-      recordName: 'www.notlai.com',
+      recordName: `www.${config.domainName}`,
       target: route53.RecordTarget.fromAlias(
         new targets.CloudFrontTarget(distribution),
       ),
@@ -692,7 +653,7 @@ function handler(event) {
 
     new route53.AaaaRecord(this, 'WwwAaaaRecord', {
       zone: hostedZone,
-      recordName: 'www.notlai.com',
+      recordName: `www.${config.domainName}`,
       target: route53.RecordTarget.fromAlias(
         new targets.CloudFrontTarget(distribution),
       ),
@@ -700,7 +661,7 @@ function handler(event) {
 
     new route53.ARecord(this, 'ApexARecord', {
       zone: hostedZone,
-      recordName: 'notlai.com',
+      recordName: config.domainName,
       target: route53.RecordTarget.fromAlias(
         new targets.CloudFrontTarget(distribution),
       ),
@@ -708,7 +669,7 @@ function handler(event) {
 
     new route53.AaaaRecord(this, 'ApexAaaaRecord', {
       zone: hostedZone,
-      recordName: 'notlai.com',
+      recordName: config.domainName,
       target: route53.RecordTarget.fromAlias(
         new targets.CloudFrontTarget(distribution),
       ),
@@ -716,7 +677,7 @@ function handler(event) {
 
     new route53.ARecord(this, 'ApiARecord', {
       zone: hostedZone,
-      recordName: 'api.notlai.com',
+      recordName: config.apiDomainName,
       target: route53.RecordTarget.fromAlias(
         new targets.ApiGatewayDomain(apiDomainName),
       ),
@@ -724,10 +685,27 @@ function handler(event) {
 
     new route53.AaaaRecord(this, 'ApiAaaaRecord', {
       zone: hostedZone,
-      recordName: 'api.notlai.com',
+      recordName: config.apiDomainName,
       target: route53.RecordTarget.fromAlias(
         new targets.ApiGatewayDomain(apiDomainName),
       ),
+    });
+
+    // ─── Monitoring ──────────────────────────────────────────────────────
+    addMonitoring(this, {
+      api: this.api,
+      functions: allFunctions,
+      streamProcessor: processNoteStreamFn,
+      streamDlq,
+      tables: [
+        this.notesTable,
+        this.tagsTable,
+        this.sharesTable,
+        this.foldersTable,
+        this.activityTable,
+      ],
+      ...(config.alertEmail ? { alertEmail: config.alertEmail } : {}),
+      monthlyBudgetUsd: config.monthlyBudgetUsd,
     });
 
     // ─── Outputs ─────────────────────────────────────────────────────────
@@ -760,11 +738,11 @@ function handler(event) {
     });
 
     new cdk.CfnOutput(this, 'ApiUrl', {
-      value: 'https://api.notlai.com',
+      value: `https://${config.apiDomainName}`,
     });
 
     new cdk.CfnOutput(this, 'FrontendUrl', {
-      value: 'https://www.notlai.com',
+      value: config.frontendUrl,
     });
   }
 }

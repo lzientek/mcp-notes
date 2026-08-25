@@ -1,5 +1,10 @@
-import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
-import { CORS_HEADERS } from './helpers/cors.js';
+import {
+  withAuth,
+  errorResponse,
+  jsonResponse,
+  requirePathParam,
+  parseBody,
+} from './helpers/http.js';
 import { generateShareId } from './helpers/share-id.js';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
@@ -9,92 +14,50 @@ const TABLE_NAME = process.env.TABLE_NAME!;
 const SHARES_TABLE_NAME = process.env.SHARES_TABLE_NAME!;
 const FRONTEND_URL = process.env.FRONTEND_URL!;
 
-export const handler = async (
-  event: APIGatewayProxyEvent,
-): Promise<APIGatewayProxyResult> => {
-  const userId = event.requestContext.authorizer?.claims?.sub;
-  if (!userId) {
-    return {
-      statusCode: 401,
-      headers: { ...CORS_HEADERS },
-      body: JSON.stringify({
-        code: 'AUTH_REQUIRED',
-        message: 'Authentication is required.',
-        remedy: 'Ensure your request includes a valid authorization token.',
-      }),
-    };
-  }
+interface ShareNoteBody {
+  type?: string;
+  email?: string;
+  permission?: string;
+}
 
-  const noteId = event.pathParameters?.noteId;
-  if (!noteId) {
-    return {
-      statusCode: 400,
-      headers: { ...CORS_HEADERS },
-      body: JSON.stringify({
-        code: 'INVALID_REQUEST',
-        message: 'Note ID is required.',
-        remedy: 'Include the note ID in the URL path.',
-      }),
-    };
-  }
+export const handler = withAuth(async (event, { userId }) => {
+  const noteId = requirePathParam(event, 'noteId', 'Note ID');
 
-  let body: { type?: string; email?: string; permission?: string };
-  try {
-    body = JSON.parse(event.body ?? '{}');
-  } catch {
-    return {
-      statusCode: 400,
-      headers: { ...CORS_HEADERS },
-      body: JSON.stringify({
-        code: 'INVALID_REQUEST',
-        message: 'Request body must be valid JSON.',
-        remedy: 'Send a JSON object with a type field ("public" or "user").',
-      }),
-    };
-  }
+  const body = parseBody<ShareNoteBody>(
+    event,
+    'Send a JSON object with a type field ("public" or "user").',
+  );
 
   const { type, email } = body;
   let permission = body.permission ?? 'read';
 
   // Validate type
   if (type !== 'public' && type !== 'user') {
-    return {
-      statusCode: 400,
-      headers: { ...CORS_HEADERS },
-      body: JSON.stringify({
-        code: 'INVALID_REQUEST',
-        message: 'Type must be "public" or "user".',
-        remedy: 'Set type to "public" for a public link or "user" for a user share.',
-      }),
-    };
+    return errorResponse(400, {
+      code: 'INVALID_REQUEST',
+      message: 'Type must be "public" or "user".',
+      remedy: 'Set type to "public" for a public link or "user" for a user share.',
+    });
   }
 
   // Validate email for user shares
   if (type === 'user') {
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      return {
-        statusCode: 400,
-        headers: { ...CORS_HEADERS },
-        body: JSON.stringify({
-          code: 'INVALID_REQUEST',
-          message: 'A valid email address is required for user shares.',
-          remedy: 'Provide a valid email in the request body.',
-        }),
-      };
+      return errorResponse(400, {
+        code: 'INVALID_REQUEST',
+        message: 'A valid email address is required for user shares.',
+        remedy: 'Provide a valid email in the request body.',
+      });
     }
   }
 
   // Validate permission
   if (permission !== 'read' && permission !== 'write') {
-    return {
-      statusCode: 400,
-      headers: { ...CORS_HEADERS },
-      body: JSON.stringify({
-        code: 'INVALID_REQUEST',
-        message: 'Permission must be "read" or "write".',
-        remedy: 'Set permission to "read" or "write".',
-      }),
-    };
+    return errorResponse(400, {
+      code: 'INVALID_REQUEST',
+      message: 'Permission must be "read" or "write".',
+      remedy: 'Set permission to "read" or "write".',
+    });
   }
 
   // Force read-only for public shares
@@ -111,15 +74,11 @@ export const handler = async (
   );
 
   if (!noteResult.Item) {
-    return {
-      statusCode: 404,
-      headers: { ...CORS_HEADERS },
-      body: JSON.stringify({
-        code: 'NOTE_NOT_FOUND',
-        message: 'The requested note was not found.',
-        remedy: 'Verify the note ID and ensure you own this note.',
-      }),
-    };
+    return errorResponse(404, {
+      code: 'NOTE_NOT_FOUND',
+      message: 'The requested note was not found.',
+      remedy: 'Verify the note ID and ensure you own this note.',
+    });
   }
 
   // Query existing shares for this note
@@ -138,16 +97,12 @@ export const handler = async (
     // Check if a public share already exists
     const existingPublic = shares.find((s) => s.type === 'public');
     if (existingPublic) {
-      return {
-        statusCode: 200,
-        headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
-        body: JSON.stringify({
-          shareId: existingPublic.shareId,
-          shareUrl: `${FRONTEND_URL}/shared/${existingPublic.shareId}`,
-          type: 'public',
-          permission: 'read',
-        }),
-      };
+      return jsonResponse(200, {
+        shareId: existingPublic.shareId,
+        shareUrl: `${FRONTEND_URL}/shared/${existingPublic.shareId}`,
+        type: 'public',
+        permission: 'read',
+      });
     }
 
     // Create new public share
@@ -168,16 +123,12 @@ export const handler = async (
       }),
     );
 
-    return {
-      statusCode: 201,
-      headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
-      body: JSON.stringify({
-        shareId,
-        shareUrl: `${FRONTEND_URL}/shared/${shareId}`,
-        type: 'public',
-        permission: 'read',
-      }),
-    };
+    return jsonResponse(201, {
+      shareId,
+      shareUrl: `${FRONTEND_URL}/shared/${shareId}`,
+      type: 'public',
+      permission: 'read',
+    });
   }
 
   // type === 'user'
@@ -201,17 +152,13 @@ export const handler = async (
       );
     }
 
-    return {
-      statusCode: 200,
-      headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
-      body: JSON.stringify({
-        shareId: existingUserShare.shareId,
-        type: 'user',
-        email,
-        permission,
-        createdAt: existingUserShare.createdAt,
-      }),
-    };
+    return jsonResponse(200, {
+      shareId: existingUserShare.shareId,
+      type: 'user',
+      email,
+      permission,
+      createdAt: existingUserShare.createdAt,
+    });
   }
 
   // Create new user share
@@ -232,15 +179,11 @@ export const handler = async (
     }),
   );
 
-  return {
-    statusCode: 201,
-    headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
-    body: JSON.stringify({
-      shareId,
-      type: 'user',
-      email,
-      permission,
-      createdAt: now,
-    }),
-  };
-};
+  return jsonResponse(201, {
+    shareId,
+    type: 'user',
+    email,
+    permission,
+    createdAt: now,
+  });
+});

@@ -39,7 +39,7 @@ export function ConfirmForm({
   };
 
   const handleResend = () => {
-    resendCode.resend(email);
+    void resendCode.resend(email);
   };
 
   return (

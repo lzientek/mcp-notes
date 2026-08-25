@@ -1,9 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { mockSend } = vi.hoisted(() => {
-  const mockSend = vi.fn();
-  return { mockSend };
-});
+const { mockSend } = vi.hoisted(() => ({ mockSend: vi.fn() }));
 
 vi.mock('@aws-sdk/client-cognito-identity-provider', () => ({
   CognitoIdentityProviderClient: class { send = mockSend; },

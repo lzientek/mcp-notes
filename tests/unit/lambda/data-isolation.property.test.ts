@@ -179,7 +179,7 @@ describe('Property 7: Data isolation via partition key', () => {
           await listHandler(event);
 
           for (const cmd of sentCommands) {
-            const input = cmd.input as Record<string, unknown>;
+            const input = cmd.input;
             if (input.ExpressionAttributeValues) {
               const values = Object.values(input.ExpressionAttributeValues as Record<string, string>);
               expect(values).not.toContain(otherUserId);

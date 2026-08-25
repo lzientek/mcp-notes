@@ -87,7 +87,7 @@ export function ActivityPanel({ noteId }: ActivityPanelProps) {
   }, [noteId]);
 
   useEffect(() => {
-    load();
+    void load();
   }, [load]);
 
   const toggleDiff = useCallback(async (timestamp: string) => {
@@ -128,7 +128,9 @@ export function ActivityPanel({ noteId }: ActivityPanelProps) {
         {events.map((event) => {
           const aiLogo = event.source ? AI_LOGOS[event.source.toLowerCase()] : null;
           const actor = event.actorEmail ?? 'Utilisateur';
-          const hasDiff = event.action === 'content_updated' && (event.details as Record<string, unknown> | null)?.hasDiff;
+          const hasDiff =
+            event.action === 'content_updated' &&
+            (event.details as { hasDiff?: boolean } | null)?.hasDiff === true;
           const diffState = expandedDiffs[event.timestamp];
 
           return (

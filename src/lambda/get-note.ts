@@ -1,5 +1,9 @@
-import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
-import { CORS_HEADERS } from './helpers/cors.js';
+import {
+  withAuth,
+  errorResponse,
+  jsonResponse,
+  requirePathParam,
+} from './helpers/http.js';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, GetCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
 
@@ -7,34 +11,8 @@ const client = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const TABLE_NAME = process.env.TABLE_NAME!;
 const SHARES_TABLE_NAME = process.env.SHARES_TABLE_NAME!;
 
-export const handler = async (
-  event: APIGatewayProxyEvent,
-): Promise<APIGatewayProxyResult> => {
-  const userId = event.requestContext.authorizer?.claims?.sub;
-  if (!userId) {
-    return {
-      statusCode: 401,
-      headers: { ...CORS_HEADERS },
-      body: JSON.stringify({
-        code: 'AUTH_REQUIRED',
-        message: 'Authentication is required.',
-        remedy: 'Ensure your request includes a valid authorization token.',
-      }),
-    };
-  }
-
-  const noteId = event.pathParameters?.noteId;
-  if (!noteId) {
-    return {
-      statusCode: 400,
-      headers: { ...CORS_HEADERS },
-      body: JSON.stringify({
-        code: 'INVALID_REQUEST',
-        message: 'Note ID is required.',
-        remedy: 'Include the note ID in the URL path.',
-      }),
-    };
-  }
+export const handler = withAuth(async (event, { userId, email }) => {
+  const noteId = requirePathParam(event, 'noteId', 'Note ID');
 
   // Try owner path first
   const result = await client.send(
@@ -45,16 +23,11 @@ export const handler = async (
   );
 
   if (result.Item) {
-    return {
-      statusCode: 200,
-      headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
-      body: JSON.stringify({ ...result.Item, isFavorite: result.Item.isFavorite ?? false }),
-    };
+    return jsonResponse(200, { ...result.Item, isFavorite: result.Item.isFavorite ?? false });
   }
 
   // Not found as owner — check if caller is a share recipient
-  const callerEmail = event.requestContext.authorizer?.claims?.email;
-  if (callerEmail) {
+  if (email) {
     const sharesResult = await client.send(
       new QueryCommand({
         TableName: SHARES_TABLE_NAME,
@@ -65,7 +38,7 @@ export const handler = async (
     );
 
     const shareRecord = (sharesResult.Items ?? []).find(
-      (item) => item.recipientEmail === callerEmail,
+      (item) => item.recipientEmail === email,
     );
 
     if (shareRecord) {
@@ -78,27 +51,19 @@ export const handler = async (
       );
 
       if (noteResult.Item) {
-        return {
-          statusCode: 200,
-          headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
-          body: JSON.stringify({
-            ...noteResult.Item,
-            isFavorite: noteResult.Item.isFavorite ?? false,
-            isShared: true,
-            permission: shareRecord.permission,
-          }),
-        };
+        return jsonResponse(200, {
+          ...noteResult.Item,
+          isFavorite: noteResult.Item.isFavorite ?? false,
+          isShared: true,
+          permission: shareRecord.permission,
+        });
       }
     }
   }
 
-  return {
-    statusCode: 404,
-    headers: { ...CORS_HEADERS },
-    body: JSON.stringify({
-      code: 'NOTE_NOT_FOUND',
-      message: 'The requested note was not found.',
-      remedy: 'Verify the note ID and try again.',
-    }),
-  };
-};
+  return errorResponse(404, {
+    code: 'NOTE_NOT_FOUND',
+    message: 'The requested note was not found.',
+    remedy: 'Verify the note ID and try again.',
+  });
+});

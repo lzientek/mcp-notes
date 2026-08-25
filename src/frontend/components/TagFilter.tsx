@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useCallback } from 'react';
 import type { Tag } from '../types.js';
 
 interface TagFilterProps {

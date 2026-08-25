@@ -21,10 +21,15 @@ jobs:
       - run: npm ci
 
       - name: Type-check
-        run: npm run lint
+        run: npm run typecheck
 
       - name: Unit tests (Lambda)
         run: npx vitest run tests/unit/lambda/
+
+      # The stack bundles dist/frontend as an asset, so synthesising it — which
+      # every CDK test does — needs the bundle to exist.
+      - name: Build frontend
+        run: node scripts/build-frontend.js
 
       - name: CDK tests
         run: npx vitest run tests/cdk/
@@ -42,8 +47,43 @@ jobs:
 
       - run: npm ci
 
+      - name: Type-check frontend
+        run: npm run typecheck:frontend
+
       - name: Frontend unit tests
         run: npx vitest run tests/unit/frontend/ tests/unit/lambda/helpers/
 
       - name: Build frontend
         run: node scripts/build-frontend.js
+
+  quality:
+    name: Quality (lint, coverage, audit, synth)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - run: npm ci
+
+      # Type-aware: oxlint runs the rules through tsgolint, which builds a real
+      # TypeScript program, so it needs the same tsconfig the compiler uses.
+      - name: Lint
+        run: npm run lint
+
+      - name: Dependency audit
+        run: npm audit --audit-level=high
+
+      # The stack bundles dist/frontend as an asset: both the CDK tests inside
+      # the coverage run and the synth below need the bundle to exist.
+      - name: Build frontend
+        run: node scripts/build-frontend.js
+
+      - name: Coverage thresholds
+        run: npm run test:coverage
+
+      - name: CDK synth
+        run: npx cdk synth --quiet

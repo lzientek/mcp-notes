@@ -87,7 +87,7 @@ export function ShareModal({ noteId, onClose }: ShareModalProps) {
 
   const handleCopy = useCallback(() => {
     if (publicLink) {
-      navigator.clipboard.writeText(publicLink);
+      void navigator.clipboard.writeText(publicLink);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     }

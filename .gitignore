@@ -4,3 +4,4 @@ cdk.out/
 .env
 .env.*
 .kiro/steering/
+coverage/

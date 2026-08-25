@@ -15,7 +15,7 @@ export function LoginPage() {
       setMcpSuccess(true);
       return;
     }
-    navigate('/');
+    void navigate('/');
   }, [isMcpFlow, navigate]);
 
   if (mcpSuccess) {

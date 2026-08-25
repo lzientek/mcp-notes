@@ -91,4 +91,167 @@ describe('McpNotes CDK Stack', () => {
       });
     });
   });
+
+  describe('CORS configuration', () => {
+    it('injects the allowed origins into every application lambda', () => {
+      const functions = template.findResources('AWS::Lambda::Function');
+      const origins = Object.values(functions)
+        .map((fn: any) => fn.Properties?.Environment?.Variables?.ALLOWED_ORIGINS)
+        .filter(Boolean);
+
+      // Every handler in src/lambda, excluding the CDK-generated helpers
+      expect(origins).toHaveLength(18);
+      expect(new Set(origins)).toEqual(
+        new Set(['https://www.notlai.com,https://notlai.com']),
+      );
+    });
+
+    it('adds dev origins passed through context', { timeout: 60_000 }, () => {
+      const devApp = new cdk.App({ context: { devOrigins: 'http://localhost:5173' } });
+      const devStack = new McpNotesStack(devApp, 'DevStack');
+      const devTemplate = Template.fromStack(devStack);
+
+      const functions = devTemplate.findResources('AWS::Lambda::Function');
+      const origin = Object.values(functions)
+        .map((fn: any) => fn.Properties?.Environment?.Variables?.ALLOWED_ORIGINS)
+        .find(Boolean);
+      expect(origin).toBe(
+        'https://www.notlai.com,https://notlai.com,http://localhost:5173',
+      );
+    });
+  });
+
+  describe('Notes table indexes', () => {
+    it('has an UpdatedAtIndex so list-notes can page without sorting in memory', () => {
+      template.hasResourceProperties('AWS::DynamoDB::Table', {
+        KeySchema: [
+          { AttributeName: 'userId', KeyType: 'HASH' },
+          { AttributeName: 'noteId', KeyType: 'RANGE' },
+        ],
+        GlobalSecondaryIndexes: Match.arrayWith([
+          Match.objectLike({
+            IndexName: 'UpdatedAtIndex',
+            KeySchema: [
+              { AttributeName: 'userId', KeyType: 'HASH' },
+              { AttributeName: 'updatedAt', KeyType: 'RANGE' },
+            ],
+            Projection: { ProjectionType: 'ALL' },
+          }),
+        ]),
+      });
+    });
+  });
+
+  describe('Data protection', () => {
+    it('enables point-in-time recovery on every table holding user data', () => {
+      const tables = template.findResources('AWS::DynamoDB::Table');
+      const retained = Object.values(tables).filter(
+        (t: any) => t.DeletionPolicy === 'Retain',
+      );
+      // notes, tags, shares, folders — the activity table is TTL'd and disposable
+      expect(retained).toHaveLength(4);
+      for (const table of retained) {
+        expect((table as any).Properties.PointInTimeRecoverySpecification).toEqual({
+          PointInTimeRecoveryEnabled: true,
+        });
+      }
+    });
+
+    it('tags every taggable resource for cost attribution', () => {
+      template.hasResourceProperties('AWS::DynamoDB::Table', {
+        // arrayWith matches an ordered subsequence: tags come out alphabetical
+        Tags: Match.arrayWith([
+          Match.objectLike({ Key: 'ManagedBy', Value: 'cdk' }),
+          Match.objectLike({ Key: 'Project', Value: 'mcp-notes' }),
+        ]),
+      });
+    });
+
+    it('cleans up interrupted uploads on the frontend bucket', () => {
+      template.hasResourceProperties('AWS::S3::Bucket', {
+        LifecycleConfiguration: {
+          Rules: Match.arrayWith([
+            Match.objectLike({
+              AbortIncompleteMultipartUpload: { DaysAfterInitiation: 7 },
+              Status: 'Enabled',
+            }),
+          ]),
+        },
+      });
+    });
+  });
+
+  describe('Stream processing', () => {
+    it('sends failed batches to a dead letter queue', () => {
+      template.hasResourceProperties('AWS::SQS::Queue', {
+        MessageRetentionPeriod: 1209600, // 14 days
+      });
+
+      template.hasResourceProperties('AWS::Lambda::EventSourceMapping', {
+        BisectBatchOnFunctionError: true,
+        MaximumRetryAttempts: 3,
+        DestinationConfig: {
+          OnFailure: { Destination: Match.anyValue() },
+        },
+      });
+    });
+  });
+
+  describe('Monitoring', () => {
+    it('stays within the free tier: 6 alarms and one dashboard', () => {
+      const alarms = template.findResources('AWS::CloudWatch::Alarm');
+      // 2 lambda-error groups + api 5xx + table throttles + DLQ + iterator age
+      expect(Object.keys(alarms)).toHaveLength(6);
+      expect(Object.keys(template.findResources('AWS::CloudWatch::Dashboard'))).toHaveLength(1);
+    });
+
+    it('alarms on a DLQ that stops being empty', () => {
+      template.hasResourceProperties('AWS::CloudWatch::Alarm', {
+        MetricName: 'ApproximateNumberOfMessagesVisible',
+        Threshold: 1,
+        ComparisonOperator: 'GreaterThanOrEqualToThreshold',
+      });
+    });
+
+    it('alarms on a stream falling more than 15 minutes behind', () => {
+      template.hasResourceProperties('AWS::CloudWatch::Alarm', {
+        MetricName: 'IteratorAge',
+        Threshold: 900000,
+      });
+    });
+
+    it('keeps lambda error alarms under the 10-metric expression cap', () => {
+      const alarms = Object.values(template.findResources('AWS::CloudWatch::Alarm'));
+      const mathAlarms = alarms.filter((a: any) => a.Properties.Metrics);
+      for (const a of mathAlarms) {
+        const metrics = (a as any).Properties.Metrics.filter((m: any) => m.MetricStat);
+        expect(metrics.length).toBeLessThanOrEqual(10);
+      }
+    });
+
+    it('creates no SNS topic or budget without an alert address', () => {
+      expect(Object.keys(template.findResources('AWS::SNS::Topic'))).toHaveLength(0);
+      expect(Object.keys(template.findResources('AWS::Budgets::Budget'))).toHaveLength(0);
+    });
+
+    it('wires alarms to email and creates the budget when an address is given', { timeout: 60_000 }, () => {
+      const alertApp = new cdk.App({
+        context: { alertEmail: 'ops@example.com', monthlyBudgetUsd: '25' },
+      });
+      const alertTemplate = Template.fromStack(new McpNotesStack(alertApp, 'AlertStack'));
+
+      alertTemplate.hasResourceProperties('AWS::SNS::Subscription', {
+        Protocol: 'email',
+        Endpoint: 'ops@example.com',
+      });
+      alertTemplate.hasResourceProperties('AWS::Budgets::Budget', {
+        Budget: Match.objectLike({
+          BudgetLimit: { Amount: 25, Unit: 'USD' },
+          TimeUnit: 'MONTHLY',
+        }),
+      });
+      const alarms = Object.values(alertTemplate.findResources('AWS::CloudWatch::Alarm'));
+      expect(alarms.every((a: any) => a.Properties.AlarmActions?.length === 1)).toBe(true);
+    });
+  });
 });

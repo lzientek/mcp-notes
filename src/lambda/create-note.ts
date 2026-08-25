@@ -1,5 +1,10 @@
-import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
-import { CORS_HEADERS } from './helpers/cors.js';
+import {
+  withAuth,
+  errorResponse,
+  jsonResponse,
+  parseBody,
+  NOTE_BODY_LIMIT,
+} from './helpers/http.js';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, PutCommand } from '@aws-sdk/lib-dynamodb';
 import { ulid } from 'ulid';
@@ -9,36 +14,20 @@ const client = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const TABLE_NAME = process.env.TABLE_NAME!;
 const TAGS_TABLE_NAME = process.env.TAGS_TABLE_NAME!;
 
-export const handler = async (
-  event: APIGatewayProxyEvent,
-): Promise<APIGatewayProxyResult> => {
-  const userId = event.requestContext.authorizer?.claims?.sub;
-  if (!userId) {
-    return {
-      statusCode: 401,
-      headers: { ...CORS_HEADERS },
-      body: JSON.stringify({
-        code: 'AUTH_REQUIRED',
-        message: 'Authentication is required.',
-        remedy: 'Ensure your request includes a valid authorization token.',
-      }),
-    };
-  }
+interface CreateNoteBody {
+  title?: string;
+  content?: string;
+  tags?: string[];
+  isFavorite?: boolean;
+  source?: string;
+}
 
-  let body: { title?: string; content?: string; tags?: string[]; isFavorite?: boolean; source?: string };
-  try {
-    body = JSON.parse(event.body ?? '{}');
-  } catch {
-    return {
-      statusCode: 400,
-      headers: { ...CORS_HEADERS },
-      body: JSON.stringify({
-        code: 'INVALID_REQUEST',
-        message: 'Request body must be valid JSON.',
-        remedy: 'Send a JSON object with title and content fields.',
-      }),
-    };
-  }
+export const handler = withAuth(async (event, { userId, email }) => {
+  const body = parseBody<CreateNoteBody>(
+    event,
+    'Send a JSON object with title and content fields.',
+    NOTE_BODY_LIMIT,
+  );
 
   const title = body.title ?? 'Untitled';
   const content = body.content ?? '';
@@ -50,15 +39,11 @@ export const handler = async (
   if (tags.length > 0) {
     const validation = await validateTags(client, TAGS_TABLE_NAME, userId, tags);
     if (!validation.valid) {
-      return {
-      statusCode: 400,
-      headers: { ...CORS_HEADERS },
-      body: JSON.stringify({
-          code: 'INVALID_TAGS',
-          message: 'Some tags do not exist.',
-          invalidTags: validation.invalidTags,
-        }),
-      };
+      return errorResponse(400, {
+        code: 'INVALID_TAGS',
+        message: 'Some tags do not exist.',
+        invalidTags: validation.invalidTags,
+      });
     }
   }
 
@@ -73,7 +58,7 @@ export const handler = async (
     tags: tags.map((t) => t.toLowerCase()),
     isFavorite,
     lastModifiedBy: source,
-    lastModifiedByUser: event.requestContext.authorizer?.claims?.email ?? userId,
+    lastModifiedByUser: email ?? userId,
     createdAt: now,
     updatedAt: now,
   };
@@ -85,9 +70,5 @@ export const handler = async (
     }),
   );
 
-  return {
-    statusCode: 201,
-    headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
-    body: JSON.stringify(note),
-  };
-};
+  return jsonResponse(201, note);
+});

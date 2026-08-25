@@ -107,7 +107,8 @@ function getInstructions(choice: LLMChoice): { steps: string[]; config?: string;
           },
         }, null, 2),
       };
-    case 'other':
+    // Also the fallback: an unknown choice gets the generic instructions.
+    default:
       return {
         steps: [
           'Configurez votre client MCP pour lancer la commande ci-dessous via stdio',
@@ -129,7 +130,7 @@ export function SetupPage() {
   const instructions = selected ? getInstructions(selected) : null;
 
   const handleCopy = (text: string) => {
-    navigator.clipboard.writeText(text);
+    void navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };

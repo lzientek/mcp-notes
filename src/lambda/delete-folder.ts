@@ -1,46 +1,24 @@
-import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
-import { CORS_HEADERS } from './helpers/cors.js';
+import {
+  withAuth,
+  errorResponse,
+  noContentResponse,
+  requirePathParam,
+} from './helpers/http.js';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import {
   DynamoDBDocumentClient,
   GetCommand,
   DeleteCommand,
-  QueryCommand,
-  PutCommand,
+  UpdateCommand,
 } from '@aws-sdk/lib-dynamodb';
+import { mapInBatches, queryAll } from './helpers/dynamo.js';
 
 const client = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const FOLDERS_TABLE_NAME = process.env.FOLDERS_TABLE_NAME!;
 const TABLE_NAME = process.env.TABLE_NAME!;
 
-export const handler = async (
-  event: APIGatewayProxyEvent,
-): Promise<APIGatewayProxyResult> => {
-  const userId = event.requestContext.authorizer?.claims?.sub;
-  if (!userId) {
-    return {
-      statusCode: 401,
-      headers: { ...CORS_HEADERS },
-      body: JSON.stringify({
-        code: 'AUTH_REQUIRED',
-        message: 'Authentication is required.',
-        remedy: 'Ensure your request includes a valid authorization token.',
-      }),
-    };
-  }
-
-  const folderId = event.pathParameters?.folderId;
-  if (!folderId) {
-    return {
-      statusCode: 400,
-      headers: { ...CORS_HEADERS },
-      body: JSON.stringify({
-        code: 'INVALID_REQUEST',
-        message: 'Folder ID is required.',
-        remedy: 'Include the folder ID in the URL path.',
-      }),
-    };
-  }
+export const handler = withAuth(async (event, { userId }) => {
+  const folderId = requirePathParam(event, 'folderId', 'Folder ID');
 
   // Verify the folder exists and belongs to the user
   const folderResult = await client.send(
@@ -51,42 +29,38 @@ export const handler = async (
   );
 
   if (!folderResult.Item) {
-    return {
-      statusCode: 404,
-      headers: { ...CORS_HEADERS },
-      body: JSON.stringify({
-        code: 'FOLDER_NOT_FOUND',
-        message: 'The requested folder was not found.',
-        remedy: 'Verify the folder ID and try again.',
-      }),
-    };
+    return errorResponse(404, {
+      code: 'FOLDER_NOT_FOUND',
+      message: 'The requested folder was not found.',
+      remedy: 'Verify the folder ID and try again.',
+    });
   }
 
-  // Move all notes in this folder back to root (set folderId to null)
-  const notesResult = await client.send(
-    new QueryCommand({
-      TableName: TABLE_NAME,
-      KeyConditionExpression: 'userId = :uid',
-      ExpressionAttributeValues: { ':uid': userId },
-    }),
-  );
+  // Move the folder's notes back to root. DynamoDB does the filtering, and only
+  // the keys come back — the note bodies are not needed to update one attribute.
+  const affectedNotes = await queryAll(client, {
+    TableName: TABLE_NAME,
+    KeyConditionExpression: 'userId = :uid',
+    FilterExpression: '#folderId = :folderId',
+    ExpressionAttributeNames: { '#folderId': 'folderId' },
+    ExpressionAttributeValues: { ':uid': userId, ':folderId': folderId },
+    ProjectionExpression: 'noteId',
+  });
 
-  const affectedNotes = (notesResult.Items ?? []).filter(
-    (note) => note.folderId === folderId,
-  );
-
-  for (const note of affectedNotes) {
-    await client.send(
-      new PutCommand({
+  // BatchWriteItem cannot apply a partial update, and rewriting whole items would
+  // clobber concurrent edits — so these are UpdateCommands, just no longer serial.
+  const now = new Date().toISOString();
+  await mapInBatches(affectedNotes, (note) =>
+    client.send(
+      new UpdateCommand({
         TableName: TABLE_NAME,
-        Item: {
-          ...note,
-          folderId: null,
-          updatedAt: new Date().toISOString(),
-        },
+        Key: { userId, noteId: note.noteId as string },
+        UpdateExpression: 'SET #folderId = :null, updatedAt = :now',
+        ExpressionAttributeNames: { '#folderId': 'folderId' },
+        ExpressionAttributeValues: { ':null': null, ':now': now },
       }),
-    );
-  }
+    ),
+  );
 
   // Delete the folder
   await client.send(
@@ -96,9 +70,5 @@ export const handler = async (
     }),
   );
 
-  return {
-    statusCode: 204,
-    headers: { ...CORS_HEADERS },
-    body: '',
-  };
-};
+  return noContentResponse();
+});

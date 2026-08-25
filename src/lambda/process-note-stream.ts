@@ -1,15 +1,24 @@
 import type { DynamoDBStreamEvent } from 'aws-lambda';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, PutCommand, QueryCommand, DeleteCommand } from '@aws-sdk/lib-dynamodb';
+import { DynamoDBDocumentClient, QueryCommand } from '@aws-sdk/lib-dynamodb';
+import { batchDelete, batchPut } from './helpers/dynamo.js';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 import type { AttributeValue } from '@aws-sdk/client-dynamodb';
-import { ulid } from 'ulid';
 import { computeDiff } from './helpers/line-diff.js';
 
 const client = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const ACTIVITY_TABLE_NAME = process.env.ACTIVITY_TABLE_NAME!;
 const MAX_EVENTS_PER_NOTE = 200;
+/**
+ * How much overflow a single purge can clear. One save emits at most a handful
+ * of events, so clearing up to this many per invocation keeps the backlog from
+ * ever growing, while bounding the work of any one run.
+ */
+const PURGE_BATCH_SIZE = 100;
 const DIFF_TTL_SECONDS = 30 * 24 * 60 * 60; // 30 days
+const EVENT_TTL_SECONDS = 365 * 24 * 60 * 60; // 1 year
+/** Activity events use an ISO timestamp as sort key; diffs use a "diff#" prefix. */
+const EVENT_SORT_KEY_PREFIX = '20';
 
 interface ActivityEvent {
   noteId: string;
@@ -28,8 +37,8 @@ function toRecord(image: Record<string, AttributeValue> | undefined): Record<str
 
 function arraysEqual(a: string[], b: string[]): boolean {
   if (a.length !== b.length) return false;
-  const sortedA = [...a].sort();
-  const sortedB = [...b].sort();
+  const sortedA = a.toSorted();
+  const sortedB = b.toSorted();
   return sortedA.every((val, i) => val === sortedB[i]);
 }
 
@@ -38,11 +47,26 @@ interface DiffItem {
   timestamp: string;
   hunks: unknown;
   ttl: number;
+  [key: string]: unknown;
+}
+
+/**
+ * Builds the sort key suffix for an event.
+ *
+ * It has to be derived from the stream record rather than randomly generated:
+ * writes go out in chunks, so a failure partway through leaves earlier chunks
+ * committed, and Lambda then retries the same records. A random suffix would
+ * write those events a second time under new keys and duplicate the timeline;
+ * a suffix tied to (eventID, index) makes the retry overwrite the same items.
+ */
+function eventSuffix(eventId: string, index: number): string {
+  return `${eventId}-${String(index)}`;
 }
 
 function detectChanges(
   oldImage: Record<string, unknown>,
   newImage: Record<string, unknown>,
+  eventId: string,
 ): { events: ActivityEvent[]; diffItems: DiffItem[] } {
   const noteId = newImage.noteId as string;
   const now = newImage.updatedAt as string ?? new Date().toISOString();
@@ -53,15 +77,20 @@ function detectChanges(
   const events: ActivityEvent[] = [];
   const diffItems: DiffItem[] = [];
 
-  const makeEvent = (action: string, details: Record<string, unknown> | null): ActivityEvent => ({
-    noteId,
-    timestamp: `${now}#${ulid()}`,
-    action,
-    actorId,
-    actorEmail,
-    source,
-    details,
-  });
+  let sequence = 0;
+  const makeEvent = (action: string, details: Record<string, unknown> | null): ActivityEvent => {
+    const event: ActivityEvent = {
+      noteId,
+      timestamp: `${now}#${eventSuffix(eventId, sequence)}`,
+      action,
+      actorId,
+      actorEmail,
+      source,
+      details,
+    };
+    sequence += 1;
+    return event;
+  };
 
   // Title changed
   if (oldImage.title !== newImage.title) {
@@ -73,10 +102,9 @@ function detectChanges(
 
   // Content changed
   if (oldImage.content !== newImage.content) {
-    const eventTs = `${now}#${ulid()}`;
     events.push(makeEvent('content_updated', { hasDiff: true }));
-    // Override the timestamp to match the diff item
-    events[events.length - 1].timestamp = eventTs;
+    // The diff item is keyed off the event it belongs to.
+    const eventTs = events[events.length - 1].timestamp;
 
     // Compute diff and store separately
     const hunks = computeDiff(
@@ -125,35 +153,56 @@ function detectChanges(
   return { events, diffItems };
 }
 
+/**
+ * Trims a note's oldest activity events past MAX_EVENTS_PER_NOTE.
+ *
+ * The read is bounded: it asks for at most MAX_EVENTS_PER_NOTE + PURGE_BATCH_SIZE
+ * keys, oldest first, so the common case (a note under the cap) costs one small
+ * query instead of reading the note's whole activity history — diff blobs
+ * included — on every single write. The begins_with keeps diff items out of the
+ * count; they carry their own 30-day TTL.
+ *
+ * The window has to exceed the cap by more than one: with Limit = cap + 1 the
+ * slice below could only ever delete a single event, while one save can emit
+ * five, so the history would grow without bound.
+ */
 async function purgeOldEvents(noteId: string): Promise<void> {
   const result = await client.send(
     new QueryCommand({
       TableName: ACTIVITY_TABLE_NAME,
-      KeyConditionExpression: 'noteId = :nid',
-      ExpressionAttributeValues: { ':nid': noteId },
+      KeyConditionExpression: 'noteId = :nid AND begins_with(#ts, :eventPrefix)',
+      ExpressionAttributeNames: { '#ts': 'timestamp' },
+      ExpressionAttributeValues: {
+        ':nid': noteId,
+        ':eventPrefix': EVENT_SORT_KEY_PREFIX,
+      },
+      ProjectionExpression: 'noteId, #ts',
       ScanIndexForward: true, // oldest first
+      Limit: MAX_EVENTS_PER_NOTE + PURGE_BATCH_SIZE,
     }),
   );
 
   const items = result.Items ?? [];
   if (items.length <= MAX_EVENTS_PER_NOTE) return;
 
-  // Delete the oldest events beyond the limit
-  const toDelete = items.slice(0, items.length - MAX_EVENTS_PER_NOTE);
-  for (const item of toDelete) {
-    await client.send(
-      new DeleteCommand({
-        TableName: ACTIVITY_TABLE_NAME,
-        Key: { noteId: item.noteId, timestamp: item.timestamp },
-      }),
-    );
-  }
+  await batchDelete(
+    client,
+    ACTIVITY_TABLE_NAME,
+    items
+      .slice(0, items.length - MAX_EVENTS_PER_NOTE)
+      .map((item) => ({ noteId: item.noteId, timestamp: item.timestamp })),
+  );
 }
 
 export const handler = async (event: DynamoDBStreamEvent): Promise<void> => {
+  const itemsToWrite: Record<string, unknown>[] = [];
+  const touchedNoteIds = new Set<string>();
+
   for (const record of event.Records) {
     try {
       const eventName = record.eventName;
+      // Stable across retries of the same record, unlike a fresh ULID.
+      const eventId = record.eventID ?? record.dynamodb?.SequenceNumber ?? '';
       const newImage = toRecord(record.dynamodb?.NewImage as Record<string, AttributeValue> | undefined);
       const oldImage = toRecord(record.dynamodb?.OldImage as Record<string, AttributeValue> | undefined);
 
@@ -169,7 +218,7 @@ export const handler = async (event: DynamoDBStreamEvent): Promise<void> => {
         // Note created
         events.push({
           noteId,
-          timestamp: `${(newImage.createdAt as string) ?? new Date().toISOString()}#${ulid()}`,
+          timestamp: `${(newImage.createdAt as string) ?? new Date().toISOString()}#${eventSuffix(eventId, 0)}`,
           action: 'note_created',
           actorId: (newImage.lastModifiedByUser as string) ?? (newImage.userId as string) ?? null,
           actorEmail: (newImage.lastModifiedByUser as string) ?? null,
@@ -178,46 +227,41 @@ export const handler = async (event: DynamoDBStreamEvent): Promise<void> => {
         });
       } else if (eventName === 'MODIFY' && oldImage && newImage) {
         // Note updated — detect what changed
-        const changes = detectChanges(oldImage, newImage);
+        const changes = detectChanges(oldImage, newImage, eventId);
         events = changes.events;
         diffItems = changes.diffItems;
-      } else if (eventName === 'REMOVE' && oldImage) {
-        // Note deleted — we don't track this in activity (note is gone)
-        // But we could clean up activity records
-        // For now, TTL will handle cleanup
+      } else if (eventName === 'REMOVE') {
+        // Note deleted — nothing to record, the TTL cleans up the history
         continue;
       }
 
-      // Write events to Activity table
-      for (const activityEvent of events) {
-        await client.send(
-          new PutCommand({
-            TableName: ACTIVITY_TABLE_NAME,
-            Item: {
-              ...activityEvent,
-              ttl: Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60, // 1 year
-            },
-          }),
-        );
-      }
+      if (events.length === 0 && diffItems.length === 0) continue;
 
-      // Write diff items (separate TTL of 30 days)
-      for (const diffItem of diffItems) {
-        await client.send(
-          new PutCommand({
-            TableName: ACTIVITY_TABLE_NAME,
-            Item: diffItem,
-          }),
-        );
-      }
+      const eventTtl = Math.floor(Date.now() / 1000) + EVENT_TTL_SECONDS;
+      itemsToWrite.push(
+        ...events.map((activityEvent) => ({ ...activityEvent, ttl: eventTtl })),
+        // Diff items carry their own, shorter TTL.
+        ...diffItems,
+      );
 
-      // Purge old events if necessary
-      if (events.length > 0) {
-        await purgeOldEvents(noteId);
-      }
+      if (events.length > 0) touchedNoteIds.add(noteId);
     } catch (err) {
-      // Log but don't throw — we don't want to block the stream
+      // Log but don't throw — one bad record must not block the stream.
       console.error('Error processing stream record:', err);
     }
+  }
+
+  // Deliberately not caught: a write failure is usually throttling or an outage,
+  // which a retry fixes. Letting it surface is what puts the batch through the
+  // retry policy and, if it keeps failing, into the DLQ. Malformed records are
+  // handled above, where a retry would not help.
+  if (itemsToWrite.length > 0) {
+    await batchPut(client, ACTIVITY_TABLE_NAME, itemsToWrite);
+  }
+
+  // Purge once per note, not once per record: a batch often carries several
+  // updates to the same note.
+  for (const noteId of touchedNoteIds) {
+    await purgeOldEvents(noteId);
   }
 };

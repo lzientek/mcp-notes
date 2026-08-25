@@ -9,7 +9,6 @@
 import { DynamoDBClient, ScanCommand } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, PutCommand, DeleteCommand } from '@aws-sdk/lib-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
-import type { AttributeValue } from '@aws-sdk/client-dynamodb';
 
 const TAGS_TABLE_NAME = 'McpNotesStack-McpNotesTagsTableB80CCCBA-76P1K18CWPFM';
 
@@ -22,7 +21,7 @@ async function migrate() {
     new ScanCommand({ TableName: TAGS_TABLE_NAME }),
   );
 
-  const items = (result.Items ?? []).map((item) => unmarshall(item as Record<string, AttributeValue>));
+  const items = (result.Items ?? []).map((item) => unmarshall(item));
   console.log(`Found ${items.length} tags`);
 
   let migrated = 0;
