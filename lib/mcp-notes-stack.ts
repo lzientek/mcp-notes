@@ -12,7 +12,8 @@ import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
 import * as origins from 'aws-cdk-lib/aws-cloudfront-origins';
 import * as s3deploy from 'aws-cdk-lib/aws-s3-deployment';
 import * as logs from 'aws-cdk-lib/aws-logs';
-import { DynamoEventSource } from 'aws-cdk-lib/aws-lambda-event-sources';
+import * as sqs from 'aws-cdk-lib/aws-sqs';
+import { DynamoEventSource, SqsDlq } from 'aws-cdk-lib/aws-lambda-event-sources';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Construct } from 'constructs';
@@ -264,11 +265,25 @@ export class McpNotesStack extends cdk.Stack {
         ACTIVITY_TABLE_NAME: this.activityTable.tableName,
     });
 
+    // Without a failure destination, a batch that keeps failing is retried until
+    // the records age out and is then dropped silently — and it blocks the shard
+    // meanwhile. Failed batches land here instead.
+    const streamDlq = new sqs.Queue(this, 'ProcessNoteStreamDlq', {
+      retentionPeriod: cdk.Duration.days(14),
+      enforceSSL: true,
+    });
+
     processNoteStreamFn.addEventSource(new DynamoEventSource(this.notesTable, {
       startingPosition: lambda.StartingPosition.TRIM_HORIZON,
       batchSize: 10,
       retryAttempts: 3,
+      // Narrow a failing batch down to the offending record instead of
+      // discarding the nine good ones with it.
+      bisectBatchOnError: true,
+      onFailure: new SqsDlq(streamDlq),
     }));
+
+    streamDlq.grantSendMessages(processNoteStreamFn);
 
     const listActivityFn = createFunction('ListActivityFn', 'list-activity.ts', 'List activity events for a note', {
         ACTIVITY_TABLE_NAME: this.activityTable.tableName,

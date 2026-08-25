@@ -152,6 +152,17 @@ describe('process-note-stream handler', () => {
     expect(deletes[0].DeleteRequest.Key.timestamp).toBe(stored[0].timestamp);
   });
 
+  it('lets a write failure surface so Lambda retries and the DLQ catches it', async () => {
+    mockSend.mockImplementation(async (cmd: any) => {
+      if (cmd.type === 'BatchWrite') throw new Error('ProvisionedThroughputExceeded');
+      return { Items: [] };
+    });
+
+    await expect(
+      handler({ Records: [record('INSERT', null, base)] } as any),
+    ).rejects.toThrow('ProvisionedThroughputExceeded');
+  });
+
   it('keeps processing after one malformed record', async () => {
     const broken = { eventName: 'MODIFY', dynamodb: { OldImage: { bad: {} }, NewImage: { bad: {} } } };
     await handler({ Records: [broken, record('INSERT', null, base)] } as any);

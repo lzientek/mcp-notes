@@ -180,4 +180,20 @@ describe('McpNotes CDK Stack', () => {
       });
     });
   });
+
+  describe('Stream processing', () => {
+    it('sends failed batches to a dead letter queue', () => {
+      template.hasResourceProperties('AWS::SQS::Queue', {
+        MessageRetentionPeriod: 1209600, // 14 days
+      });
+
+      template.hasResourceProperties('AWS::Lambda::EventSourceMapping', {
+        BisectBatchOnFunctionError: true,
+        MaximumRetryAttempts: 3,
+        DestinationConfig: {
+          OnFailure: { Destination: Match.anyValue() },
+        },
+      });
+    });
+  });
 });

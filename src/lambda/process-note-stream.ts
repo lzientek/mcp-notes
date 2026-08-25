@@ -221,17 +221,17 @@ export const handler = async (event: DynamoDBStreamEvent): Promise<void> => {
     }
   }
 
-  try {
-    if (itemsToWrite.length > 0) {
-      await batchPut(client, ACTIVITY_TABLE_NAME, itemsToWrite);
-    }
+  // Deliberately not caught: a write failure is usually throttling or an outage,
+  // which a retry fixes. Letting it surface is what puts the batch through the
+  // retry policy and, if it keeps failing, into the DLQ. Malformed records are
+  // handled above, where a retry would not help.
+  if (itemsToWrite.length > 0) {
+    await batchPut(client, ACTIVITY_TABLE_NAME, itemsToWrite);
+  }
 
-    // Purge once per note, not once per record: a batch often carries several
-    // updates to the same note.
-    for (const noteId of touchedNoteIds) {
-      await purgeOldEvents(noteId);
-    }
-  } catch (err) {
-    console.error('Error writing activity events:', err);
+  // Purge once per note, not once per record: a batch often carries several
+  // updates to the same note.
+  for (const noteId of touchedNoteIds) {
+    await purgeOldEvents(noteId);
   }
 };
