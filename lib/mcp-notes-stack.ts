@@ -98,6 +98,15 @@ export class McpNotesStack extends cdk.Stack {
       stream: dynamodb.StreamViewType.NEW_AND_OLD_IMAGES,
     });
 
+    // Lets list-notes page through notes newest-first without reading the whole
+    // partition and sorting in memory.
+    this.notesTable.addGlobalSecondaryIndex({
+      indexName: 'UpdatedAtIndex',
+      partitionKey: { name: 'userId', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'updatedAt', type: dynamodb.AttributeType.STRING },
+      projectionType: dynamodb.ProjectionType.ALL,
+    });
+
     // ─── DynamoDB Tags Table ─────────────────────────────────────────────
     this.tagsTable = new dynamodb.Table(this, 'McpNotesTagsTable', {
       partitionKey: { name: 'userId', type: dynamodb.AttributeType.STRING },

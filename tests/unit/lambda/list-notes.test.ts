@@ -7,6 +7,7 @@ vi.mock('@aws-sdk/client-dynamodb', () => ({
 vi.mock('@aws-sdk/lib-dynamodb', () => ({
   DynamoDBDocumentClient: { from: () => ({ send: mockSend }) },
   QueryCommand: class { constructor(public input: any) {} },
+  BatchGetCommand: class { constructor(public input: any) {} },
 }));
 
 process.env.TABLE_NAME = 'NotesTable';
@@ -26,6 +27,11 @@ const sampleNotes = [
   { noteId: 'n3', title: 'Older note', content: 'old stuff', tags: ['personal'], createdAt: '2025-06-01T00:00:00Z', updatedAt: '2025-06-01T00:00:00Z' },
 ];
 
+/** Input of the nth QueryCommand the handler sent. */
+function queryInput(call = 0) {
+  return mockSend.mock.calls[call][0].input;
+}
+
 describe('list-notes handler', () => {
   beforeEach(() => {
     mockSend.mockReset();
@@ -38,33 +44,87 @@ describe('list-notes handler', () => {
     expect(res.statusCode).toBe(401);
   });
 
-  it('returns notes sorted by updatedAt desc', async () => {
+  it('queries the UpdatedAtIndex newest-first so DynamoDB does the sorting', async () => {
     const res = await handler(makeEvent());
     expect(res.statusCode).toBe(200);
+    expect(queryInput().IndexName).toBe('UpdatedAtIndex');
+    expect(queryInput().ScanIndexForward).toBe(false);
+    expect(queryInput().Limit).toBe(20);
     const body = JSON.parse(res.body);
-    expect(body.notes[0].noteId).toBe('n1');
-    expect(body.notes[1].noteId).toBe('n2');
+    expect(body.notes.map((n: any) => n.noteId)).toEqual(['n1', 'n2', 'n3']);
   });
 
-  it('filters by favorites', async () => {
-    const res = await handler(makeEvent({ favorites: 'true' }));
+  it('pushes the favorites filter down to DynamoDB', async () => {
+    await handler(makeEvent({ favorites: 'true' }));
+    expect(queryInput().FilterExpression).toContain('#isFavorite = :true');
+    expect(queryInput().ExpressionAttributeValues[':true']).toBe(true);
+  });
+
+  it('pushes tag filters down as a contains OR chain', async () => {
+    await handler(makeEvent({ tags: 'personal,work' }));
+    expect(queryInput().FilterExpression).toBe('(contains(#tags, :tag0) OR contains(#tags, :tag1))');
+    expect(queryInput().ExpressionAttributeValues[':tag0']).toBe('personal');
+    expect(queryInput().ExpressionAttributeValues[':tag1']).toBe('work');
+  });
+
+  it('pushes date bounds down and keeps "to" inclusive', async () => {
+    await handler(makeEvent({ from: '2026-01-01', to: '2026-01-31' }));
+    expect(queryInput().FilterExpression).toBe('#createdAt >= :fromDate AND #createdAt <= :toDate');
+    expect(queryInput().ExpressionAttributeValues[':toDate']).toBe('2026-01-31T23:59:59.999Z');
+  });
+
+  it('treats folderId=root as "no folder"', async () => {
+    await handler(makeEvent({ folderId: 'root' }));
+    expect(queryInput().FilterExpression).toBe('(attribute_not_exists(#folderId) OR #folderId = :null)');
+  });
+
+  it('filters by search in memory (DynamoDB contains is case-sensitive)', async () => {
+    const res = await handler(makeEvent({ search: 'HELLO' }));
+    expect(queryInput().FilterExpression).toBeUndefined();
     const body = JSON.parse(res.body);
     expect(body.notes).toHaveLength(1);
     expect(body.notes[0].noteId).toBe('n1');
   });
 
-  it('filters by tags', async () => {
-    const res = await handler(makeEvent({ tags: 'personal' }));
+  it('returns an opaque cursor built from the last note of the page', async () => {
+    mockSend.mockResolvedValue({
+      Items: sampleNotes,
+      LastEvaluatedKey: { userId: 'user-123', noteId: 'n3', updatedAt: '2025-06-01T00:00:00Z' },
+    });
+    const res = await handler(makeEvent({ limit: '2' }));
     const body = JSON.parse(res.body);
-    expect(body.notes).toHaveLength(1);
-    expect(body.notes[0].noteId).toBe('n3');
+    expect(body.notes).toHaveLength(2);
+    const decoded = JSON.parse(Buffer.from(body.nextCursor, 'base64url').toString());
+    expect(decoded).toEqual({ userId: 'user-123', noteId: 'n2', updatedAt: '2026-01-02T00:00:00Z' });
   });
 
-  it('filters by search', async () => {
-    const res = await handler(makeEvent({ search: 'hello' }));
+  it('resumes from the cursor instead of restarting the partition', async () => {
+    const cursor = Buffer.from(
+      JSON.stringify({ userId: 'user-123', noteId: 'n2', updatedAt: '2026-01-02T00:00:00Z' }),
+    ).toString('base64url');
+    await handler(makeEvent({ cursor }));
+    expect(queryInput().ExclusiveStartKey).toEqual({
+      userId: 'user-123',
+      noteId: 'n2',
+      updatedAt: '2026-01-02T00:00:00Z',
+    });
+  });
+
+  it('rejects a malformed cursor with 400 instead of silently restarting', async () => {
+    const res = await handler(makeEvent({ cursor: 'not-a-cursor' }));
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body).code).toBe('INVALID_CURSOR');
+  });
+
+  it('keeps following LastEvaluatedKey until the page is full', async () => {
+    mockSend
+      .mockResolvedValueOnce({ Items: [sampleNotes[0]], LastEvaluatedKey: { userId: 'user-123', noteId: 'n1', updatedAt: '2026-01-03T00:00:00Z' } })
+      .mockResolvedValueOnce({ Items: [sampleNotes[1]] });
+    const res = await handler(makeEvent({ limit: '2' }));
+    expect(mockSend).toHaveBeenCalledTimes(2);
     const body = JSON.parse(res.body);
-    expect(body.notes).toHaveLength(1);
-    expect(body.notes[0].noteId).toBe('n1');
+    expect(body.notes).toHaveLength(2);
+    expect(body.nextCursor).toBeNull();
   });
 
   it('ensures isFavorite defaults to false when missing', async () => {
