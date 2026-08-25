@@ -1,4 +1,9 @@
-import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
+import {
+  errorResponse,
+  jsonResponse,
+  requirePathParam,
+  withErrorHandling,
+} from './helpers/http.js';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, GetCommand } from '@aws-sdk/lib-dynamodb';
 
@@ -13,21 +18,8 @@ const PUBLIC_CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Methods': 'GET,OPTIONS',
 };
 
-export const handler = async (
-  event: APIGatewayProxyEvent,
-): Promise<APIGatewayProxyResult> => {
-  const shareId = event.pathParameters?.shareId;
-  if (!shareId) {
-    return {
-      statusCode: 400,
-      headers: { ...PUBLIC_CORS_HEADERS },
-      body: JSON.stringify({
-        code: 'INVALID_REQUEST',
-        message: 'Share ID is required.',
-        remedy: 'Include the share ID in the URL path.',
-      }),
-    };
-  }
+export const handler = withErrorHandling(async (event) => {
+  const shareId = requirePathParam(event, 'shareId', 'Share ID');
 
   // Look up the share record
   const shareResult = await client.send(
@@ -38,15 +30,11 @@ export const handler = async (
   );
 
   if (!shareResult.Item) {
-    return {
-      statusCode: 404,
-      headers: { ...PUBLIC_CORS_HEADERS },
-      body: JSON.stringify({
-        code: 'SHARE_NOT_FOUND',
-        message: 'This shared note does not exist or has been revoked.',
-        remedy: 'Check the URL or contact the note owner for a new link.',
-      }),
-    };
+    return errorResponse(404, {
+      code: 'SHARE_NOT_FOUND',
+      message: 'This shared note does not exist or has been revoked.',
+      remedy: 'Check the URL or contact the note owner for a new link.',
+    }, PUBLIC_CORS_HEADERS);
   }
 
   const { userId, noteId } = shareResult.Item;
@@ -60,23 +48,15 @@ export const handler = async (
   );
 
   if (!noteResult.Item) {
-    return {
-      statusCode: 404,
-      headers: { ...PUBLIC_CORS_HEADERS },
-      body: JSON.stringify({
-        code: 'SHARE_NOT_FOUND',
-        message: 'This shared note does not exist or has been revoked.',
-        remedy: 'Check the URL or contact the note owner for a new link.',
-      }),
-    };
+    return errorResponse(404, {
+      code: 'SHARE_NOT_FOUND',
+      message: 'This shared note does not exist or has been revoked.',
+      remedy: 'Check the URL or contact the note owner for a new link.',
+    }, PUBLIC_CORS_HEADERS);
   }
 
   // Return only safe fields (privacy: no userId, noteId, tags, isFavorite)
   const { title, content, createdAt, updatedAt } = noteResult.Item;
 
-  return {
-    statusCode: 200,
-    headers: { 'Content-Type': 'application/json', ...PUBLIC_CORS_HEADERS },
-    body: JSON.stringify({ title, content, createdAt, updatedAt }),
-  };
-};
+  return jsonResponse(200, { title, content, createdAt, updatedAt }, PUBLIC_CORS_HEADERS);
+}, PUBLIC_CORS_HEADERS);

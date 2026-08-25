@@ -1,5 +1,9 @@
-import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
-import { CORS_HEADERS } from './helpers/cors.js';
+import {
+  withAuth,
+  errorResponse,
+  noContentResponse,
+  requirePathParam,
+} from './helpers/http.js';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import {
   DynamoDBDocumentClient,
@@ -13,34 +17,8 @@ const client = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const FOLDERS_TABLE_NAME = process.env.FOLDERS_TABLE_NAME!;
 const TABLE_NAME = process.env.TABLE_NAME!;
 
-export const handler = async (
-  event: APIGatewayProxyEvent,
-): Promise<APIGatewayProxyResult> => {
-  const userId = event.requestContext.authorizer?.claims?.sub;
-  if (!userId) {
-    return {
-      statusCode: 401,
-      headers: { ...CORS_HEADERS },
-      body: JSON.stringify({
-        code: 'AUTH_REQUIRED',
-        message: 'Authentication is required.',
-        remedy: 'Ensure your request includes a valid authorization token.',
-      }),
-    };
-  }
-
-  const folderId = event.pathParameters?.folderId;
-  if (!folderId) {
-    return {
-      statusCode: 400,
-      headers: { ...CORS_HEADERS },
-      body: JSON.stringify({
-        code: 'INVALID_REQUEST',
-        message: 'Folder ID is required.',
-        remedy: 'Include the folder ID in the URL path.',
-      }),
-    };
-  }
+export const handler = withAuth(async (event, { userId }) => {
+  const folderId = requirePathParam(event, 'folderId', 'Folder ID');
 
   // Verify the folder exists and belongs to the user
   const folderResult = await client.send(
@@ -51,15 +29,11 @@ export const handler = async (
   );
 
   if (!folderResult.Item) {
-    return {
-      statusCode: 404,
-      headers: { ...CORS_HEADERS },
-      body: JSON.stringify({
-        code: 'FOLDER_NOT_FOUND',
-        message: 'The requested folder was not found.',
-        remedy: 'Verify the folder ID and try again.',
-      }),
-    };
+    return errorResponse(404, {
+      code: 'FOLDER_NOT_FOUND',
+      message: 'The requested folder was not found.',
+      remedy: 'Verify the folder ID and try again.',
+    });
   }
 
   // Move all notes in this folder back to root (set folderId to null)
@@ -96,9 +70,5 @@ export const handler = async (
     }),
   );
 
-  return {
-    statusCode: 204,
-    headers: { ...CORS_HEADERS },
-    body: '',
-  };
-};
+  return noContentResponse();
+});

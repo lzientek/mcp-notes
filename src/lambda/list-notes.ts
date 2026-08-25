@@ -1,28 +1,16 @@
-import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, QueryCommand, BatchGetCommand } from '@aws-sdk/lib-dynamodb';
-import { CORS_HEADERS } from './helpers/cors.js';
+import {
+  withAuth,
+  errorResponse,
+  jsonResponse,
+} from './helpers/http.js';
 
 const client = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const TABLE_NAME = process.env.TABLE_NAME!;
 const SHARES_TABLE_NAME = process.env.SHARES_TABLE_NAME!;
 
-export const handler = async (
-  event: APIGatewayProxyEvent,
-): Promise<APIGatewayProxyResult> => {
-  const userId = event.requestContext.authorizer?.claims?.sub;
-  if (!userId) {
-    return {
-      statusCode: 401,
-      headers: { ...CORS_HEADERS },
-      body: JSON.stringify({
-        code: 'AUTH_REQUIRED',
-        message: 'Authentication is required.',
-        remedy: 'Ensure your request includes a valid authorization token.',
-      }),
-    };
-  }
-
+export const handler = withAuth(async (event, { userId, email }) => {
   const params = event.queryStringParameters ?? {};
   const limit = Math.min(Number(params.limit) || 20, 100);
   const cursor = params.cursor;
@@ -36,15 +24,11 @@ export const handler = async (
 
   // Validate scope parameter
   if (!['own', 'shared', 'all'].includes(scope)) {
-    return {
-      statusCode: 400,
-      headers: { ...CORS_HEADERS },
-      body: JSON.stringify({
-        code: 'INVALID_REQUEST',
-        message: 'Invalid scope parameter. Must be "own", "shared", or "all".',
-        remedy: 'Use scope=own, scope=shared, or scope=all.',
-      }),
-    };
+    return errorResponse(400, {
+      code: 'INVALID_REQUEST',
+      message: 'Invalid scope parameter. Must be "own", "shared", or "all".',
+      remedy: 'Use scope=own, scope=shared, or scope=all.',
+    });
   }
 
   let ownNotes: Record<string, unknown>[] = [];
@@ -65,15 +49,14 @@ export const handler = async (
 
   // Fetch shared notes
   if (scope === 'shared' || scope === 'all') {
-    const callerEmail = event.requestContext.authorizer?.claims?.email;
-    if (callerEmail) {
+        if (email) {
       // Query GSI2 (RecipientEmailIndex) for shares with this recipient
       const sharesResult = await client.send(
         new QueryCommand({
           TableName: SHARES_TABLE_NAME,
           IndexName: 'RecipientEmailIndex',
           KeyConditionExpression: 'recipientEmail = :email',
-          ExpressionAttributeValues: { ':email': callerEmail },
+          ExpressionAttributeValues: { ':email': email },
         }),
       );
 
@@ -188,9 +171,5 @@ export const handler = async (
     isFavorite: note.isFavorite ?? false,
   }));
 
-  return {
-    statusCode: 200,
-    headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
-    body: JSON.stringify({ notes: output, nextCursor }),
-  };
-};
+  return jsonResponse(200, { notes: output, nextCursor });
+});

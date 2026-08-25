@@ -1,5 +1,9 @@
-import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
-import { CORS_HEADERS } from './helpers/cors.js';
+import {
+  withAuth,
+  errorResponse,
+  noContentResponse,
+  requirePathParam,
+} from './helpers/http.js';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import {
   DynamoDBDocumentClient,
@@ -13,34 +17,8 @@ const client = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const TAGS_TABLE_NAME = process.env.TAGS_TABLE_NAME!;
 const TABLE_NAME = process.env.TABLE_NAME!;
 
-export const handler = async (
-  event: APIGatewayProxyEvent,
-): Promise<APIGatewayProxyResult> => {
-  const userId = event.requestContext.authorizer?.claims?.sub;
-  if (!userId) {
-    return {
-      statusCode: 401,
-      headers: { ...CORS_HEADERS },
-      body: JSON.stringify({
-        code: 'AUTH_REQUIRED',
-        message: 'Authentication is required.',
-        remedy: 'Ensure your request includes a valid authorization token.',
-      }),
-    };
-  }
-
-  const tagId = event.pathParameters?.tagId;
-  if (!tagId) {
-    return {
-      statusCode: 400,
-      headers: { ...CORS_HEADERS },
-      body: JSON.stringify({
-        code: 'INVALID_REQUEST',
-        message: 'Tag ID is required.',
-        remedy: 'Include the tag ID in the URL path.',
-      }),
-    };
-  }
+export const handler = withAuth(async (event, { userId }) => {
+  const tagId = requirePathParam(event, 'tagId', 'Tag ID');
 
   // Get the tag to retrieve its name
   const tagResult = await client.send(
@@ -51,15 +29,11 @@ export const handler = async (
   );
 
   if (!tagResult.Item) {
-    return {
-      statusCode: 404,
-      headers: { ...CORS_HEADERS },
-      body: JSON.stringify({
-        code: 'TAG_NOT_FOUND',
-        message: 'The requested tag was not found.',
-        remedy: 'Verify the tag ID and try again.',
-      }),
-    };
+    return errorResponse(404, {
+      code: 'TAG_NOT_FOUND',
+      message: 'The requested tag was not found.',
+      remedy: 'Verify the tag ID and try again.',
+    });
   }
 
   const tagName = tagResult.Item.name as string;
@@ -103,9 +77,5 @@ export const handler = async (
     }),
   );
 
-  return {
-      statusCode: 204,
-      headers: { ...CORS_HEADERS },
-      body: '',
-  };
-};
+  return noContentResponse();
+});
