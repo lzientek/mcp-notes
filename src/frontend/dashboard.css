@@ -459,29 +459,44 @@
   margin-bottom: 0.3rem;
 }
 
-/* Task list checkboxes (marked generates li > input[type=checkbox]) */
-.markdown-body li:has(> input[type="checkbox"]) {
+/*
+ * Task list checkboxes. marked emits `li > input[type=checkbox]`, and adds the
+ * .task-list-item class or not depending on the version, so both are matched.
+ *
+ * Deliberately not flex. A flex container turns every inline node into its own
+ * flex item, so each run of text and each <code> in the item became a separate
+ * column laid out side by side — a sentence with three inline code spans broke
+ * into four narrow columns of one word per line. The checkbox is taken out of
+ * the flow instead: the text stays a single inline run, and the padding gives
+ * wrapped lines a hanging indent that lines up under the first one.
+ */
+.markdown-body ul:has(li > input[type="checkbox"]),
+.markdown-body ul.contains-task-list {
   list-style: none;
-  display: flex;
-  align-items: baseline;
-  gap: 0.4rem;
-  margin-left: -1.5rem;
+  padding-left: 0.25rem;
+}
+
+.markdown-body li:has(> input[type="checkbox"]),
+.markdown-body li.task-list-item {
+  list-style: none;
+  display: block;
+  position: relative;
+  padding-left: 1.5rem;
   margin-bottom: 0.35rem;
 }
 
 .markdown-body li > input[type="checkbox"] {
   appearance: none;
   -webkit-appearance: none;
+  position: absolute;
+  left: 0;
+  top: 0.3em;
   width: 0.9rem;
   height: 0.9rem;
-  min-width: 0.9rem;
   border: 1.5px solid #c7d2fe;
   border-radius: 3px;
   cursor: default;
-  position: relative;
   background: #f9fafb;
-  flex-shrink: 0;
-  translate: 0 1px;
 }
 
 .markdown-body li > input[type="checkbox"]:checked {
@@ -501,48 +516,6 @@
   transform: rotate(45deg);
 }
 
-.markdown-body ul.contains-task-list {
-  list-style: none;
-  padding-left: 0.25rem;
-}
-
-.markdown-body li.task-list-item {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.5rem;
-  margin-bottom: 0.4rem;
-}
-
-.markdown-body li.task-list-item input[type="checkbox"] {
-  appearance: none;
-  -webkit-appearance: none;
-  width: 1.1rem;
-  height: 1.1rem;
-  min-width: 1.1rem;
-  border: 2px solid #d1d5db;
-  border-radius: 4px;
-  margin-top: 0.15rem;
-  cursor: default;
-  position: relative;
-  background: white;
-}
-
-.markdown-body li.task-list-item input[type="checkbox"]:checked {
-  background: #6366f1;
-  border-color: #6366f1;
-}
-
-.markdown-body li.task-list-item input[type="checkbox"]:checked::after {
-  content: '';
-  position: absolute;
-  left: 3px;
-  top: 0px;
-  width: 5px;
-  height: 9px;
-  border: solid white;
-  border-width: 0 2px 2px 0;
-  transform: rotate(45deg);
-}
 
 .markdown-body code {
   background: #f3f4f6;
@@ -550,6 +523,8 @@
   padding: 0.15rem 0.4rem;
   font-size: 0.85em;
   font-family: 'SF Mono', Menlo, Consolas, monospace;
+  /* A long identifier should wrap at the edge rather than push the line out. */
+  overflow-wrap: anywhere;
 }
 
 .markdown-body pre {
