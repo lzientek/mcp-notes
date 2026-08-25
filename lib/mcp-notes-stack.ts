@@ -704,7 +704,7 @@ function handler(event) {
         this.foldersTable,
         this.activityTable,
       ],
-      ...(config.alertEmail ? { alertEmail: config.alertEmail } : {}),
+      alertEmail: config.alertEmail,
       monthlyBudgetUsd: config.monthlyBudgetUsd,
     });
 

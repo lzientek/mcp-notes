@@ -18,11 +18,11 @@ export interface MonitoringProps {
   streamDlq: sqs.IQueue;
   tables: dynamodb.ITable[];
   /**
-   * Where alarms and the budget notification are sent. Pass it at deploy time:
-   * `npx cdk deploy -c alertEmail=you@example.com`. Without it the alarms and
-   * the dashboard are still created — they simply have nowhere to notify.
+   * Where alarms and the budget notification are sent. Defaults to the address
+   * in lib/config.ts; override it at deploy time with
+   * `npx cdk deploy -c alertEmail=someone@example.com`.
    */
-  alertEmail?: string;
+  alertEmail: string;
   /** Monthly spend, in USD, above which the budget notifies. */
   monthlyBudgetUsd: number;
 }
@@ -63,13 +63,10 @@ function sumOf(
  * each summed into one alarm rather than split per resource.
  */
 export function addMonitoring(scope: Construct, props: MonitoringProps): void {
-  const topic = props.alertEmail
-    ? new sns.Topic(scope, 'AlarmTopic', { displayName: 'mcp-notes alarms' })
-    : undefined;
-
-  if (topic && props.alertEmail) {
-    topic.addSubscription(new subscriptions.EmailSubscription(props.alertEmail));
-  }
+  const topic = new sns.Topic(scope, 'AlarmTopic', {
+    displayName: 'mcp-notes alarms',
+  });
+  topic.addSubscription(new subscriptions.EmailSubscription(props.alertEmail));
 
   const alarm = (
     id: string,
@@ -87,7 +84,7 @@ export function addMonitoring(scope: Construct, props: MonitoringProps): void {
         cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
       treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
     });
-    if (topic) created.addAlarmAction(new actions.SnsAction(topic));
+    created.addAlarmAction(new actions.SnsAction(topic));
     return created;
   };
 
@@ -213,29 +210,24 @@ export function addMonitoring(scope: Construct, props: MonitoringProps): void {
     ],
   });
 
-  // AWS Budgets needs somewhere to send the notification, so it is only created
-  // when an alert address is provided. The first two budgets are free.
-  if (props.alertEmail) {
-    new budgets.CfnBudget(scope, 'MonthlyBudget', {
-      budget: {
-        budgetName: 'mcp-notes-monthly',
-        budgetType: 'COST',
-        timeUnit: 'MONTHLY',
-        budgetLimit: { amount: props.monthlyBudgetUsd, unit: 'USD' },
-      },
-      notificationsWithSubscribers: [
-        {
-          notification: {
-            notificationType: 'FORECASTED',
-            comparisonOperator: 'GREATER_THAN',
-            threshold: 100,
-            thresholdType: 'PERCENTAGE',
-          },
-          subscribers: [
-            { subscriptionType: 'EMAIL', address: props.alertEmail },
-          ],
+  // The first two budgets are free.
+  new budgets.CfnBudget(scope, 'MonthlyBudget', {
+    budget: {
+      budgetName: 'mcp-notes-monthly',
+      budgetType: 'COST',
+      timeUnit: 'MONTHLY',
+      budgetLimit: { amount: props.monthlyBudgetUsd, unit: 'USD' },
+    },
+    notificationsWithSubscribers: [
+      {
+        notification: {
+          notificationType: 'FORECASTED',
+          comparisonOperator: 'GREATER_THAN',
+          threshold: 100,
+          thresholdType: 'PERCENTAGE',
         },
-      ],
-    });
-  }
+        subscribers: [{ subscriptionType: 'EMAIL', address: props.alertEmail }],
+      },
+    ],
+  });
 }

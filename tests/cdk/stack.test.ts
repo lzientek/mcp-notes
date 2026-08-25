@@ -229,12 +229,26 @@ describe('McpNotes CDK Stack', () => {
       }
     });
 
-    it('creates no SNS topic or budget without an alert address', () => {
-      expect(Object.keys(template.findResources('AWS::SNS::Topic'))).toHaveLength(0);
-      expect(Object.keys(template.findResources('AWS::Budgets::Budget'))).toHaveLength(0);
+    it('notifies the default address, with every alarm wired to it', () => {
+      template.hasResourceProperties('AWS::SNS::Subscription', {
+        Protocol: 'email',
+        Endpoint: 'lucas@zientek.fr',
+      });
+
+      const alarms = Object.values(template.findResources('AWS::CloudWatch::Alarm'));
+      expect(alarms.every((a: any) => a.Properties.AlarmActions?.length === 1)).toBe(true);
     });
 
-    it('wires alarms to email and creates the budget when an address is given', { timeout: 60_000 }, () => {
+    it('creates a 10 USD monthly budget by default', () => {
+      template.hasResourceProperties('AWS::Budgets::Budget', {
+        Budget: Match.objectLike({
+          BudgetLimit: { Amount: 10, Unit: 'USD' },
+          TimeUnit: 'MONTHLY',
+        }),
+      });
+    });
+
+    it('lets context override the address and the budget', { timeout: 60_000 }, () => {
       const alertApp = new cdk.App({
         context: { alertEmail: 'ops@example.com', monthlyBudgetUsd: '25' },
       });
