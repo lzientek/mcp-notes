@@ -35,6 +35,8 @@ function record(eventName: string, oldImage: any, newImage: any) {
         );
   return {
     eventName,
+    // The real service sends a stable eventID; retries of a record reuse it.
+    eventID: `evt-${eventName}-${String((newImage ?? oldImage)?.noteId ?? 'x')}`,
     dynamodb: { OldImage: marshal(oldImage), NewImage: marshal(newImage) },
   };
 }
@@ -125,17 +127,19 @@ describe('process-note-stream handler', () => {
     await handler({ Records: [record('INSERT', null, base)] } as any);
 
     const query = commandsOfType('Query')[0];
-    expect(query.input.Limit).toBe(201);
+    // cap + one purge batch: a window of cap + 1 could only ever delete one
+    // event, while a single save can emit five
+    expect(query.input.Limit).toBe(300);
     expect(query.input.ScanIndexForward).toBe(true);
     expect(query.input.KeyConditionExpression).toContain('begins_with(#ts, :eventPrefix)');
     expect(query.input.ExpressionAttributeValues[':eventPrefix']).toBe('20');
     expect(query.input.ProjectionExpression).toBe('noteId, #ts');
   });
 
-  it('deletes only the overflow when a note exceeds the cap', async () => {
-    const stored = Array.from({ length: 201 }, (_, i) => ({
+  it('deletes the whole overflow, not just one event', async () => {
+    const stored = Array.from({ length: 250 }, (_, i) => ({
       noteId: 'note-1',
-      timestamp: `2026-01-01T00:00:${String(i).padStart(2, '0')}Z#x`,
+      timestamp: `2026-01-01T00:00:${String(i).padStart(4, '0')}Z#x`,
     }));
     mockSend.mockImplementation(async (cmd: any) =>
       cmd.type === 'Query' ? { Items: stored } : {},
@@ -148,8 +152,47 @@ describe('process-note-stream handler', () => {
       .filter((c) => c.type === 'BatchWrite')
       .flatMap((c) => c.input.RequestItems.ActivityTable)
       .filter((r: any) => r.DeleteRequest);
-    expect(deletes).toHaveLength(1);
+    expect(deletes).toHaveLength(50); // 250 stored - 200 cap
     expect(deletes[0].DeleteRequest.Key.timestamp).toBe(stored[0].timestamp);
+    expect(deletes[49].DeleteRequest.Key.timestamp).toBe(stored[49].timestamp);
+  });
+
+  it('writes the same sort keys when a record is retried', async () => {
+    const streamEvent = { Records: [record('INSERT', null, base)] } as any;
+
+    await handler(streamEvent);
+    const first = writtenItems().map((i: any) => i.PutRequest.Item.timestamp);
+
+    mockSend.mockReset();
+    mockSend.mockResolvedValue({ Items: [] });
+    await handler(streamEvent);
+    const second = writtenItems().map((i: any) => i.PutRequest.Item.timestamp);
+
+    // A random suffix would duplicate the event on the retry Lambda performs
+    // after a partial batch failure; these must overwrite instead.
+    expect(second).toEqual(first);
+  });
+
+  it('gives each event of one record its own key', async () => {
+    await handler({
+      Records: [
+        record('MODIFY', base, { ...base, title: 'New', content: 'other', isFavorite: true }),
+      ],
+    } as any);
+
+    const timestamps = writtenItems().map((i: any) => i.PutRequest.Item.timestamp);
+    expect(new Set(timestamps).size).toBe(timestamps.length);
+  });
+
+  it('keys the diff item off the event it belongs to', async () => {
+    await handler({
+      Records: [record('MODIFY', base, { ...base, content: 'changed' })],
+    } as any);
+
+    const items = writtenItems().map((i: any) => i.PutRequest.Item);
+    const event = items.find((i: any) => i.action === 'content_updated');
+    const diff = items.find((i: any) => String(i.timestamp).startsWith('diff#'));
+    expect(diff.timestamp).toBe(`diff#${event.timestamp}`);
   });
 
   it('lets a write failure surface so Lambda retries and the DLQ catches it', async () => {

@@ -98,7 +98,7 @@ describe('queryAll', () => {
       .mockResolvedValueOnce({ Items: [{ id: 1 }], LastEvaluatedKey: { id: 1 } })
       .mockResolvedValueOnce({ Items: [{ id: 2 }] });
 
-    const items = await queryAll(client, { TableName: 'T' } as any);
+    const items = await queryAll(client, { TableName: 'T' });
     expect(items).toEqual([{ id: 1 }, { id: 2 }]);
     expect(mockSend.mock.calls[1][0].input.ExclusiveStartKey).toEqual({ id: 1 });
   });
@@ -108,13 +108,13 @@ describe('queryAll', () => {
       .mockResolvedValueOnce({ Items: [], LastEvaluatedKey: { id: 1 } })
       .mockResolvedValueOnce({ Items: [{ id: 2 }] });
 
-    expect(await queryAll(client, { TableName: 'T' } as any)).toEqual([{ id: 2 }]);
+    expect(await queryAll(client, { TableName: 'T' })).toEqual([{ id: 2 }]);
   });
 
   it('throws rather than returning a truncated list at the page cap', async () => {
     mockSend.mockResolvedValue({ Items: [{ id: 1 }], LastEvaluatedKey: { id: 1 } });
 
-    await expect(queryAll(client, { TableName: 'Notes' } as any)).rejects.toThrow(
+    await expect(queryAll(client, { TableName: 'Notes' })).rejects.toThrow(
       /exceeded 100 pages/,
     );
   });
@@ -139,6 +139,6 @@ describe('mapInBatches', () => {
     );
 
     expect(peak).toBe(2);
-    expect(seen.toSorted()).toEqual([1, 2, 3, 4, 5]);
+    expect(seen.toSorted((a, b) => a - b)).toEqual([1, 2, 3, 4, 5]);
   });
 });
