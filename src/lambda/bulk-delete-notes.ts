@@ -5,7 +5,8 @@ import {
   parseBody,
 } from './helpers/http.js';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, DeleteCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
+import { DynamoDBDocumentClient, QueryCommand } from '@aws-sdk/lib-dynamodb';
+import { batchDelete } from './helpers/dynamo.js';
 
 const client = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const TABLE_NAME = process.env.TABLE_NAME!;
@@ -34,35 +35,33 @@ export const handler = withAuth(async (event, { userId }) => {
     });
   }
 
-  // Delete each note and cascade delete shares
-  for (const noteId of noteIds) {
-    // Delete the note
-    await client.send(
-      new DeleteCommand({
-        TableName: TABLE_NAME,
-        Key: { userId, noteId },
-      }),
-    );
+  await batchDelete(
+    client,
+    TABLE_NAME,
+    noteIds.map((noteId) => ({ userId, noteId })),
+  );
 
-    // Cascade delete all share records for this note
-    const sharesResult = await client.send(
-      new QueryCommand({
-        TableName: SHARES_TABLE_NAME,
-        IndexName: 'NoteIdIndex',
-        KeyConditionExpression: 'noteId = :nid',
-        ExpressionAttributeValues: { ':nid': noteId },
-      }),
-    );
-
-    const shares = sharesResult.Items ?? [];
-    for (const share of shares) {
-      await client.send(
-        new DeleteCommand({
+  // Cascade: shares are keyed by shareId in their own table, so each note needs a
+  // NoteIdIndex lookup. The lookups run concurrently, the deletes go out batched.
+  const shareLookups = await Promise.all(
+    noteIds.map((noteId) =>
+      client.send(
+        new QueryCommand({
           TableName: SHARES_TABLE_NAME,
-          Key: { shareId: share.shareId as string },
+          IndexName: 'NoteIdIndex',
+          KeyConditionExpression: 'noteId = :nid',
+          ExpressionAttributeValues: { ':nid': noteId },
         }),
-      );
-    }
+      ),
+    ),
+  );
+
+  const shareKeys = shareLookups.flatMap((result) =>
+    (result.Items ?? []).map((share) => ({ shareId: share.shareId as string })),
+  );
+
+  if (shareKeys.length > 0) {
+    await batchDelete(client, SHARES_TABLE_NAME, shareKeys);
   }
 
   return jsonResponse(200, { deleted: noteIds.length });

@@ -9,9 +9,9 @@ import {
   DynamoDBDocumentClient,
   GetCommand,
   DeleteCommand,
-  QueryCommand,
-  PutCommand,
+  UpdateCommand,
 } from '@aws-sdk/lib-dynamodb';
+import { mapInBatches, queryAll } from './helpers/dynamo.js';
 
 const client = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const FOLDERS_TABLE_NAME = process.env.FOLDERS_TABLE_NAME!;
@@ -36,31 +36,31 @@ export const handler = withAuth(async (event, { userId }) => {
     });
   }
 
-  // Move all notes in this folder back to root (set folderId to null)
-  const notesResult = await client.send(
-    new QueryCommand({
-      TableName: TABLE_NAME,
-      KeyConditionExpression: 'userId = :uid',
-      ExpressionAttributeValues: { ':uid': userId },
-    }),
-  );
+  // Move the folder's notes back to root. DynamoDB does the filtering, and only
+  // the keys come back — the note bodies are not needed to update one attribute.
+  const affectedNotes = await queryAll(client, {
+    TableName: TABLE_NAME,
+    KeyConditionExpression: 'userId = :uid',
+    FilterExpression: '#folderId = :folderId',
+    ExpressionAttributeNames: { '#folderId': 'folderId' },
+    ExpressionAttributeValues: { ':uid': userId, ':folderId': folderId },
+    ProjectionExpression: 'noteId',
+  });
 
-  const affectedNotes = (notesResult.Items ?? []).filter(
-    (note) => note.folderId === folderId,
-  );
-
-  for (const note of affectedNotes) {
-    await client.send(
-      new PutCommand({
+  // BatchWriteItem cannot apply a partial update, and rewriting whole items would
+  // clobber concurrent edits — so these are UpdateCommands, just no longer serial.
+  const now = new Date().toISOString();
+  await mapInBatches(affectedNotes, (note) =>
+    client.send(
+      new UpdateCommand({
         TableName: TABLE_NAME,
-        Item: {
-          ...note,
-          folderId: null,
-          updatedAt: new Date().toISOString(),
-        },
+        Key: { userId, noteId: note.noteId as string },
+        UpdateExpression: 'SET #folderId = :null, updatedAt = :now',
+        ExpressionAttributeNames: { '#folderId': 'folderId' },
+        ExpressionAttributeValues: { ':null': null, ':now': now },
       }),
-    );
-  }
+    ),
+  );
 
   // Delete the folder
   await client.send(
