@@ -84,8 +84,43 @@ export function requirePathParam(
   return value;
 }
 
-/** Parses a JSON request body. Throws a 400 ApiError when the body is malformed. */
-export function parseBody<T>(event: APIGatewayProxyEvent, remedy: string): T {
+/**
+ * Body size ceiling for small payloads (a tag name, a share, a list of ids).
+ * API Gateway only stops at 10 MB, which is far more than any of these need.
+ */
+export const SMALL_BODY_LIMIT = 8 * 1024;
+
+/**
+ * Ceiling for note content. A DynamoDB item cannot exceed 400 KB, so a larger
+ * body could only fail deep in the write with an opaque SDK error.
+ */
+export const NOTE_BODY_LIMIT = 350 * 1024;
+
+function bodySizeInBytes(event: APIGatewayProxyEvent): number {
+  const raw = event.body ?? '';
+  return event.isBase64Encoded
+    ? Math.floor((raw.length * 3) / 4)
+    : Buffer.byteLength(raw, 'utf8');
+}
+
+/**
+ * Parses a JSON request body, rejecting anything over maxBytes first.
+ * Throws a 413 ApiError when too large, a 400 when malformed.
+ */
+export function parseBody<T>(
+  event: APIGatewayProxyEvent,
+  remedy: string,
+  maxBytes: number = SMALL_BODY_LIMIT,
+): T {
+  const size = bodySizeInBytes(event);
+  if (size > maxBytes) {
+    throw new ApiError(413, {
+      code: 'PAYLOAD_TOO_LARGE',
+      message: `Request body is ${size} bytes, above the ${maxBytes} byte limit.`,
+      remedy: 'Split the content into smaller notes or trim the request.',
+    });
+  }
+
   try {
     return JSON.parse(event.body ?? '{}') as T;
   } catch {

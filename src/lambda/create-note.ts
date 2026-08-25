@@ -3,6 +3,7 @@ import {
   errorResponse,
   jsonResponse,
   parseBody,
+  NOTE_BODY_LIMIT,
 } from './helpers/http.js';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, PutCommand } from '@aws-sdk/lib-dynamodb';
@@ -25,6 +26,7 @@ export const handler = withAuth(async (event, { userId, email }) => {
   const body = parseBody<CreateNoteBody>(
     event,
     'Send a JSON object with title and content fields.',
+    NOTE_BODY_LIMIT,
   );
 
   const title = body.title ?? 'Untitled';

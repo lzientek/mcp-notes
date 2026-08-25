@@ -4,6 +4,7 @@ import {
   jsonResponse,
   requirePathParam,
   parseBody,
+  NOTE_BODY_LIMIT,
 } from './helpers/http.js';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, PutCommand, GetCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
@@ -29,6 +30,7 @@ export const handler = withAuth(async (event, { userId, email }) => {
   const body = parseBody<UpdateNoteBody>(
     event,
     'Send a JSON object with title and/or content fields.',
+    NOTE_BODY_LIMIT,
   );
 
   // Try to get the note with caller's userId (owner path)
