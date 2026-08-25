@@ -26,6 +26,11 @@ jobs:
       - name: Unit tests (Lambda)
         run: npx vitest run tests/unit/lambda/
 
+      # The stack bundles dist/frontend as an asset, so synthesising it — which
+      # every CDK test does — needs the bundle to exist.
+      - name: Build frontend
+        run: node scripts/build-frontend.js
+
       - name: CDK tests
         run: npx vitest run tests/cdk/
 
@@ -67,12 +72,13 @@ jobs:
       - name: Dependency audit
         run: npm audit --audit-level=high
 
-      - name: Coverage thresholds
-        run: npm run test:coverage
-
-      # The stack bundles dist/frontend, so it has to exist before synth.
+      # The stack bundles dist/frontend as an asset: both the CDK tests inside
+      # the coverage run and the synth below need the bundle to exist.
       - name: Build frontend
         run: node scripts/build-frontend.js
+
+      - name: Coverage thresholds
+        run: npm run test:coverage
 
       - name: CDK synth
         run: npx cdk synth --quiet
