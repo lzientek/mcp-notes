@@ -1,3 +1,9 @@
+// Note, Tag and Folder are the DynamoDB shapes — defined once in src/types
+// and re-exported here so frontend imports stay local.
+import type { Note, Tag, Folder } from '../types/notes.js';
+
+export type { Note, Tag, Folder };
+
 export type AppStep = 'signup' | 'confirm' | 'success' | 'login' | 'login-success' | 'login-error' | 'dashboard' | 'detail';
 
 export interface FormErrors {
@@ -25,31 +31,6 @@ export interface UseResendCodeReturn {
   isLoading: boolean;
   cooldownRemaining: number;
   message: string | null;
-}
-
-export interface Note {
-  userId: string;
-  noteId: string;
-  title: string;
-  content: string;
-  tags: string[];
-  folderId: string | null;
-  isFavorite: boolean;
-  lastModifiedBy: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface Tag {
-  tagId: string;
-  name: string;
-  createdAt: string;
-}
-
-export interface Folder {
-  folderId: string;
-  name: string;
-  createdAt: string;
 }
 
 export interface NotesFilters {

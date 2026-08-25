@@ -5,6 +5,7 @@ import {
   BatchGetCommand,
 } from '@aws-sdk/lib-dynamodb';
 import { ApiError, withAuth, errorResponse, jsonResponse } from './helpers/http.js';
+import type { NoteItem, SharedNote, SharePermission } from '../types/notes.js';
 
 const client = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const TABLE_NAME = process.env.TABLE_NAME!;
@@ -20,7 +21,8 @@ const UPDATED_AT_INDEX = 'UpdatedAtIndex';
  */
 const MAX_QUERY_PAGES = 10;
 
-type Item = Record<string, unknown>;
+/** What DynamoDB hands back: a note, plus share metadata for shared ones. */
+type Item = NoteItem | (NoteItem & Partial<SharedNote>);
 
 interface NoteFilters {
   tags: string[] | null;
@@ -119,8 +121,8 @@ function buildFilterExpression(filters: NoteFilters): {
 }
 
 function matchesSearch(note: Item, search: string): boolean {
-  const title = ((note.title as string) ?? '').toLowerCase();
-  const content = ((note.content as string) ?? '').toLowerCase();
+  const title = (note.title ?? '').toLowerCase();
+  const content = (note.content ?? '').toLowerCase();
   return title.includes(search) || content.includes(search);
 }
 
@@ -131,17 +133,17 @@ function applyInMemoryFilters(notes: Item[], filters: NoteFilters): Item[] {
   if (filters.tags && filters.tags.length > 0) {
     const wanted = filters.tags;
     result = result.filter((note) => {
-      const noteTags = (note.tags as string[] | undefined) ?? [];
+      const noteTags = note.tags ?? [];
       return wanted.some((tag) => noteTags.includes(tag));
     });
   }
   if (filters.fromDate) {
     const from = filters.fromDate;
-    result = result.filter((note) => (note.createdAt as string) >= from);
+    result = result.filter((note) => (note.createdAt ?? '') >= from);
   }
   if (filters.toDate) {
     const to = endOfDay(filters.toDate);
-    result = result.filter((note) => (note.createdAt as string) <= to);
+    result = result.filter((note) => (note.createdAt ?? '') <= to);
   }
   if (filters.search) {
     const search = filters.search;
@@ -197,7 +199,7 @@ async function queryOwnNotes(
       }),
     );
     pages += 1;
-    const items = result.Items ?? [];
+    const items = (result.Items ?? []) as Item[];
     collected.push(
       ...(filters.search
         ? items.filter((item) => matchesSearch(item, filters.search!))
@@ -215,8 +217,8 @@ async function queryOwnNotes(
     if (last) {
       nextCursor = encodeCursor({
         userId,
-        noteId: last.noteId as string,
-        updatedAt: last.updatedAt as string,
+        noteId: last.noteId ?? '',
+        updatedAt: last.updatedAt ?? '',
       });
     } else if (startKey) {
       // Page emptied by the in-memory search filter — resume where DynamoDB stopped.
@@ -256,7 +258,7 @@ async function fetchSharedNotes(email: string | null): Promise<Item[]> {
       new BatchGetCommand({ RequestItems: { [TABLE_NAME]: { Keys: chunk } } }),
     );
 
-    for (const note of batchResult.Responses?.[TABLE_NAME] ?? []) {
+    for (const note of (batchResult.Responses?.[TABLE_NAME] ?? []) as NoteItem[]) {
       const share = shares.find(
         (s) => s.noteId === note.noteId && s.userId === note.userId,
       );
@@ -265,7 +267,7 @@ async function fetchSharedNotes(email: string | null): Promise<Item[]> {
           ...note,
           isShared: true,
           ownerId: share.userId as string,
-          permission: share.permission as string,
+          permission: share.permission as SharePermission,
           sharedAt: share.createdAt as string,
         });
       }
@@ -323,9 +325,7 @@ export const handler = withAuth(async (event, { userId, email }) => {
     notes = [...own.notes, ...shared];
   }
 
-  notes.sort((a, b) =>
-    (b.updatedAt as string).localeCompare(a.updatedAt as string),
-  );
+  notes.sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''));
 
   return jsonResponse(200, {
     notes: withDefaults(notes.slice(0, limit)),
