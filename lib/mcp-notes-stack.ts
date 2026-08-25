@@ -36,6 +36,11 @@ export class McpNotesStack extends cdk.Stack {
 
     const config = resolveConfig(this.node);
 
+    // Applied to every taggable resource in the stack, for cost attribution.
+    cdk.Tags.of(this).add('Project', 'mcp-notes');
+    cdk.Tags.of(this).add('Environment', 'prod');
+    cdk.Tags.of(this).add('ManagedBy', 'cdk');
+
     // ─── Cognito User Pool ───────────────────────────────────────────────
     this.userPool = new cognito.UserPool(this, 'McpNotesUserPool', {
       selfSignUpEnabled: true,
@@ -97,6 +102,7 @@ export class McpNotesStack extends cdk.Stack {
       partitionKey: { name: 'userId', type: dynamodb.AttributeType.STRING },
       sortKey: { name: 'noteId', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
       removalPolicy: cdk.RemovalPolicy.RETAIN,
       stream: dynamodb.StreamViewType.NEW_AND_OLD_IMAGES,
     });
@@ -115,6 +121,7 @@ export class McpNotesStack extends cdk.Stack {
       partitionKey: { name: 'userId', type: dynamodb.AttributeType.STRING },
       sortKey: { name: 'tagId', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
 
@@ -122,6 +129,7 @@ export class McpNotesStack extends cdk.Stack {
     this.sharesTable = new dynamodb.Table(this, 'McpNotesSharesTable', {
       partitionKey: { name: 'shareId', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
 
@@ -140,6 +148,7 @@ export class McpNotesStack extends cdk.Stack {
       partitionKey: { name: 'userId', type: dynamodb.AttributeType.STRING },
       sortKey: { name: 'folderId', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
 
@@ -536,6 +545,15 @@ export class McpNotesStack extends cdk.Stack {
       removalPolicy: cdk.RemovalPolicy.DESTROY,
       autoDeleteObjects: true,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      enforceSSL: true,
+      lifecycleRules: [
+        {
+          // Stale assets are already pruned by BucketDeployment; what lingers
+          // otherwise is the debris of interrupted uploads.
+          id: 'abort-incomplete-uploads',
+          abortIncompleteMultipartUploadAfter: cdk.Duration.days(7),
+        },
+      ],
     });
 
     // CloudFront Function to redirect bare domain to www

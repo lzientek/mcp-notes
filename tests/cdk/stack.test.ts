@@ -141,4 +141,43 @@ describe('McpNotes CDK Stack', () => {
       });
     });
   });
+
+  describe('Data protection', () => {
+    it('enables point-in-time recovery on every table holding user data', () => {
+      const tables = template.findResources('AWS::DynamoDB::Table');
+      const retained = Object.values(tables).filter(
+        (t: any) => t.DeletionPolicy === 'Retain',
+      );
+      // notes, tags, shares, folders — the activity table is TTL'd and disposable
+      expect(retained).toHaveLength(4);
+      for (const table of retained) {
+        expect((table as any).Properties.PointInTimeRecoverySpecification).toEqual({
+          PointInTimeRecoveryEnabled: true,
+        });
+      }
+    });
+
+    it('tags every taggable resource for cost attribution', () => {
+      template.hasResourceProperties('AWS::DynamoDB::Table', {
+        // arrayWith matches an ordered subsequence: tags come out alphabetical
+        Tags: Match.arrayWith([
+          Match.objectLike({ Key: 'ManagedBy', Value: 'cdk' }),
+          Match.objectLike({ Key: 'Project', Value: 'mcp-notes' }),
+        ]),
+      });
+    });
+
+    it('cleans up interrupted uploads on the frontend bucket', () => {
+      template.hasResourceProperties('AWS::S3::Bucket', {
+        LifecycleConfiguration: {
+          Rules: Match.arrayWith([
+            Match.objectLike({
+              AbortIncompleteMultipartUpload: { DaysAfterInitiation: 7 },
+              Status: 'Enabled',
+            }),
+          ]),
+        },
+      });
+    });
+  });
 });
