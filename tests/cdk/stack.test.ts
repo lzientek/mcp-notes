@@ -91,4 +91,54 @@ describe('McpNotes CDK Stack', () => {
       });
     });
   });
+
+  describe('CORS configuration', () => {
+    it('injects the allowed origins into every application lambda', () => {
+      const functions = template.findResources('AWS::Lambda::Function');
+      const origins = Object.values(functions)
+        .map((fn: any) => fn.Properties?.Environment?.Variables?.ALLOWED_ORIGINS)
+        .filter(Boolean);
+
+      // Every handler in src/lambda, excluding the CDK-generated helpers
+      expect(origins).toHaveLength(18);
+      expect(new Set(origins)).toEqual(
+        new Set(['https://www.notlai.com,https://notlai.com']),
+      );
+    });
+
+    it('adds dev origins passed through context', { timeout: 60_000 }, () => {
+      const devApp = new cdk.App({ context: { devOrigins: 'http://localhost:5173' } });
+      const devStack = new McpNotesStack(devApp, 'DevStack');
+      const devTemplate = Template.fromStack(devStack);
+
+      const functions = devTemplate.findResources('AWS::Lambda::Function');
+      const origins = Object.values(functions)
+        .map((fn: any) => fn.Properties?.Environment?.Variables?.ALLOWED_ORIGINS)
+        .filter(Boolean);
+      expect(origins[0]).toBe(
+        'https://www.notlai.com,https://notlai.com,http://localhost:5173',
+      );
+    });
+  });
+
+  describe('Notes table indexes', () => {
+    it('has an UpdatedAtIndex so list-notes can page without sorting in memory', () => {
+      template.hasResourceProperties('AWS::DynamoDB::Table', {
+        KeySchema: [
+          { AttributeName: 'userId', KeyType: 'HASH' },
+          { AttributeName: 'noteId', KeyType: 'RANGE' },
+        ],
+        GlobalSecondaryIndexes: Match.arrayWith([
+          Match.objectLike({
+            IndexName: 'UpdatedAtIndex',
+            KeySchema: [
+              { AttributeName: 'userId', KeyType: 'HASH' },
+              { AttributeName: 'updatedAt', KeyType: 'RANGE' },
+            ],
+            Projection: { ProjectionType: 'ALL' },
+          }),
+        ]),
+      });
+    });
+  });
 });

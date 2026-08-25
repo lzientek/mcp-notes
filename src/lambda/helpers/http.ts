@@ -1,5 +1,5 @@
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
-import { CORS_HEADERS } from './cors.js';
+import { CORS_HEADERS, corsHeadersFor } from './cors.js';
 
 /** Structured error payload returned to clients and to the MCP server. */
 export interface ApiErrorBody {
@@ -145,14 +145,18 @@ type AuthedHandler = (
  */
 export function withErrorHandling(
   handler: Handler,
-  headers: Record<string, string> = CORS_HEADERS,
+  headers?: Record<string, string>,
 ): Handler {
   return async (event) => {
+    // A public endpoint passes its own headers; everyone else gets the origin
+    // resolved per request, since Allow-Origin only holds one value.
+    const responseHeaders = headers ?? corsHeadersFor(event);
     try {
-      return await handler(event);
+      const response = await handler(event);
+      return { ...response, headers: { ...responseHeaders, ...response.headers } };
     } catch (err) {
       if (err instanceof ApiError) {
-        return errorResponse(err.statusCode, err.body, headers);
+        return errorResponse(err.statusCode, err.body, responseHeaders);
       }
       console.error('Unhandled error:', err);
       return errorResponse(
@@ -162,7 +166,7 @@ export function withErrorHandling(
           message: 'An unexpected error occurred.',
           remedy: 'Retry in a few moments. If the problem persists, report it.',
         },
-        headers,
+        responseHeaders,
       );
     }
   };
@@ -171,22 +175,18 @@ export function withErrorHandling(
 /** Wraps a handler with Cognito claim extraction plus withErrorHandling. */
 export function withAuth(
   handler: AuthedHandler,
-  headers: Record<string, string> = CORS_HEADERS,
+  headers?: Record<string, string>,
 ): Handler {
   return withErrorHandling(async (event) => {
     const userId = event.requestContext.authorizer?.claims?.sub as
       | string
       | undefined;
     if (!userId) {
-      return errorResponse(
-        401,
-        {
-          code: 'AUTH_REQUIRED',
-          message: 'Authentication is required.',
-          remedy: 'Ensure your request includes a valid authorization token.',
-        },
-        headers,
-      );
+      return errorResponse(401, {
+        code: 'AUTH_REQUIRED',
+        message: 'Authentication is required.',
+        remedy: 'Ensure your request includes a valid authorization token.',
+      });
     }
     const email = (event.requestContext.authorizer?.claims?.email ?? null) as
       | string
