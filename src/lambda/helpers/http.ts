@@ -156,7 +156,10 @@ export function withErrorHandling(
     const responseHeaders = headers ?? corsHeadersFor(event);
     try {
       const response = await handler(event);
-      return { ...response, headers: { ...responseHeaders, ...response.headers } };
+      // The CORS headers go last on purpose: the response builders default to
+      // the static CORS_HEADERS, whose origin is the canonical one. Letting
+      // those win would undo the per-request resolution on every 2xx.
+      return { ...response, headers: { ...response.headers, ...responseHeaders } };
     } catch (err) {
       if (err instanceof ApiError) {
         return errorResponse(err.statusCode, err.body, responseHeaders);

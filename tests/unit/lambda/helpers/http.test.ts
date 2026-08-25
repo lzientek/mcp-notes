@@ -118,6 +118,57 @@ describe('parseBody', () => {
   });
 });
 
+describe('per-request CORS origin', () => {
+  const allowlisted = 'https://notlai.com'; // second entry of ALLOWED_ORIGINS
+
+  it('echoes an allowlisted origin on a success response', async () => {
+    const handler = withAuth(async () => jsonResponse(200, { ok: true }));
+    const res = await handler(makeEvent({ headers: { origin: allowlisted } }));
+    expect(res.headers?.['Access-Control-Allow-Origin']).toBe(allowlisted);
+  });
+
+  it('echoes it on a returned error response too', async () => {
+    const handler = withAuth(async () =>
+      errorResponse(404, { code: 'NOPE', message: 'Not found.' }),
+    );
+    const res = await handler(makeEvent({ headers: { origin: allowlisted } }));
+    expect(res.headers?.['Access-Control-Allow-Origin']).toBe(allowlisted);
+  });
+
+  it('echoes it on the 401 from withAuth', async () => {
+    const handler = withAuth(async () => jsonResponse(200, {}));
+    const res = await handler({
+      requestContext: { authorizer: { claims: {} } },
+      headers: { origin: allowlisted },
+    } as any);
+    expect(res.statusCode).toBe(401);
+    expect(res.headers?.['Access-Control-Allow-Origin']).toBe(allowlisted);
+  });
+
+  it('falls back to the canonical origin for an unknown one', async () => {
+    const handler = withAuth(async () => jsonResponse(200, {}));
+    const res = await handler(makeEvent({ headers: { origin: 'https://evil.example' } }));
+    expect(res.headers?.['Access-Control-Allow-Origin']).toBe('https://www.notlai.com');
+  });
+
+  it('keeps the Content-Type set by jsonResponse', async () => {
+    const handler = withAuth(async () => jsonResponse(200, {}));
+    const res = await handler(makeEvent({ headers: { origin: allowlisted } }));
+    expect(res.headers?.['Content-Type']).toBe('application/json');
+    expect(res.headers?.Vary).toBe('Origin');
+  });
+
+  it('leaves a public endpoint on its own headers', async () => {
+    const publicHeaders = { 'Access-Control-Allow-Origin': '*' };
+    const handler = withErrorHandling(
+      async () => jsonResponse(200, {}, publicHeaders),
+      publicHeaders,
+    );
+    const res = await handler(makeEvent({ headers: { origin: allowlisted } }));
+    expect(res.headers?.['Access-Control-Allow-Origin']).toBe('*');
+  });
+});
+
 describe('withAuth', () => {
   it('rejects a request with no sub claim', async () => {
     const handler = withAuth(async () => jsonResponse(200, {}));
