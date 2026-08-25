@@ -32,8 +32,8 @@ function toRecord(image: Record<string, AttributeValue> | undefined): Record<str
 
 function arraysEqual(a: string[], b: string[]): boolean {
   if (a.length !== b.length) return false;
-  const sortedA = [...a].sort();
-  const sortedB = [...b].sort();
+  const sortedA = a.toSorted();
+  const sortedB = b.toSorted();
   return sortedA.every((val, i) => val === sortedB[i]);
 }
 
@@ -42,6 +42,7 @@ interface DiffItem {
   timestamp: string;
   hunks: unknown;
   ttl: number;
+  [key: string]: unknown;
 }
 
 function detectChanges(
@@ -211,7 +212,7 @@ export const handler = async (event: DynamoDBStreamEvent): Promise<void> => {
       itemsToWrite.push(
         ...events.map((activityEvent) => ({ ...activityEvent, ttl: eventTtl })),
         // Diff items carry their own, shorter TTL.
-        ...diffItems.map((diffItem) => ({ ...diffItem })),
+        ...diffItems,
       );
 
       if (events.length > 0) touchedNoteIds.add(noteId);

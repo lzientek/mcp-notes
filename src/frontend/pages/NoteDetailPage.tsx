@@ -7,11 +7,11 @@ export function NoteDetailPage() {
   const navigate = useNavigate();
 
   const handleBack = useCallback(() => {
-    navigate('/');
+    void navigate('/');
   }, [navigate]);
 
   if (!noteId) {
-    navigate('/', { replace: true });
+    void navigate('/', { replace: true });
     return null;
   }
 

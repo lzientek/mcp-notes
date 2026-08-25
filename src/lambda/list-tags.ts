@@ -14,7 +14,7 @@ export const handler = withAuth(async (_event, { userId }) => {
     }),
   );
 
-  const tags = (result.Items ?? []).sort((a, b) =>
+  const tags = (result.Items ?? []).toSorted((a, b) =>
     (a.name as string).localeCompare(b.name as string),
   );
 

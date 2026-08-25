@@ -87,7 +87,7 @@ export function ActivityPanel({ noteId }: ActivityPanelProps) {
   }, [noteId]);
 
   useEffect(() => {
-    load();
+    void load();
   }, [load]);
 
   const toggleDiff = useCallback(async (timestamp: string) => {

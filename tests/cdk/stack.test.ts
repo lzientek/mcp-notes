@@ -112,10 +112,10 @@ describe('McpNotes CDK Stack', () => {
       const devTemplate = Template.fromStack(devStack);
 
       const functions = devTemplate.findResources('AWS::Lambda::Function');
-      const origins = Object.values(functions)
+      const origin = Object.values(functions)
         .map((fn: any) => fn.Properties?.Environment?.Variables?.ALLOWED_ORIGINS)
-        .filter(Boolean);
-      expect(origins[0]).toBe(
+        .find(Boolean);
+      expect(origin).toBe(
         'https://www.notlai.com,https://notlai.com,http://localhost:5173',
       );
     });

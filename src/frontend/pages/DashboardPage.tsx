@@ -7,7 +7,7 @@ export function DashboardPage() {
 
   const handleSelectNote = useCallback(
     (noteId: string) => {
-      navigate(`/notes/${noteId}`);
+      void navigate(`/notes/${noteId}`);
     },
     [navigate],
   );

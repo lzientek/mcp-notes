@@ -325,7 +325,9 @@ export const handler = withAuth(async (event, { userId, email }) => {
     notes = [...own.notes, ...shared];
   }
 
-  notes.sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''));
+  notes = notes.toSorted((a, b) =>
+    (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''),
+  );
 
   return jsonResponse(200, {
     notes: withDefaults(notes.slice(0, limit)),

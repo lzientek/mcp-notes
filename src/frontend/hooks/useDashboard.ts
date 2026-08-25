@@ -46,26 +46,26 @@ export function useDashboard() {
   }, []);
 
   useEffect(() => {
-    loadTags();
-    loadFolders();
-    loadNotes(filters);
+    void loadTags();
+    void loadFolders();
+    void loadNotes(filters);
   }, []);
 
   const applyFilters = useCallback((newFilters: NotesFilters) => {
     const updated = { ...newFilters, cursor: undefined };
     setFilters(updated);
-    loadNotes(updated);
+    void loadNotes(updated);
   }, [loadNotes]);
 
   const loadMore = useCallback(() => {
     if (nextCursor) {
       const withCursor = { ...filters, cursor: nextCursor };
-      loadNotes(withCursor, true);
+      void loadNotes(withCursor, true);
     }
   }, [nextCursor, filters, loadNotes]);
 
   const refresh = useCallback(() => {
-    loadNotes(filters);
+    void loadNotes(filters);
   }, [filters, loadNotes]);
 
   const createFolder = useCallback(async (name: string) => {

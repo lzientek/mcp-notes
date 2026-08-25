@@ -88,6 +88,17 @@ async function getValidToken(): Promise<string | null> {
 
 // ─── API Methods ───────────────────────────────────────────────────
 
+/**
+ * RequestInit.headers is a HeadersInit: it can be a Headers instance or an array
+ * of pairs, and spreading either into an object literal silently produces
+ * garbage. Headers handles all three shapes.
+ */
+function authHeaders(options: RequestInit, token: string): Headers {
+  const headers = new Headers(options.headers);
+  headers.set('Authorization', `Bearer ${token}`);
+  return headers;
+}
+
 async function fetchWithAuth(url: string, options: RequestInit = {}): Promise<Response> {
   let token = await getValidToken();
   if (!token) {
@@ -98,10 +109,7 @@ async function fetchWithAuth(url: string, options: RequestInit = {}): Promise<Re
 
   const res = await fetch(url, {
     ...options,
-    headers: {
-      ...options.headers,
-      Authorization: `Bearer ${token}`,
-    },
+    headers: authHeaders(options, token),
   });
 
   if (res.status === 401) {
@@ -115,10 +123,7 @@ async function fetchWithAuth(url: string, options: RequestInit = {}): Promise<Re
       // Retry with new token
       const retry = await fetch(url, {
         ...options,
-        headers: {
-          ...options.headers,
-          Authorization: `Bearer ${token}`,
-        },
+        headers: authHeaders(options, token),
       });
       if (!retry.ok && retry.status === 401) {
         clearSession();

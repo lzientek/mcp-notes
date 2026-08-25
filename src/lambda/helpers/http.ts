@@ -107,6 +107,9 @@ function bodySizeInBytes(event: APIGatewayProxyEvent): number {
  * Parses a JSON request body, rejecting anything over maxBytes first.
  * Throws a 413 ApiError when too large, a 400 when malformed.
  */
+// T is the caller's assertion of the body shape; without it every call site
+// would have to cast the result itself.
+// oxlint-disable-next-line typescript/no-unnecessary-type-parameters
 export function parseBody<T>(
   event: APIGatewayProxyEvent,
   remedy: string,

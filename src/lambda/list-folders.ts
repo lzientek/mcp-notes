@@ -14,7 +14,7 @@ export const handler = withAuth(async (_event, { userId }) => {
     }),
   );
 
-  const folders = (result.Items ?? []).sort((a, b) =>
+  const folders = (result.Items ?? []).toSorted((a, b) =>
     (a.name as string).localeCompare(b.name as string),
   );
 

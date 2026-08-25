@@ -27,10 +27,10 @@ function record(eventName: string, oldImage: any, newImage: any) {
             typeof v === 'boolean'
               ? { BOOL: v }
               : Array.isArray(v)
-                ? { L: v.map((s) => ({ S: String(s) })) }
+                ? { L: (v as string[]).map((s) => ({ S: s })) }
                 : v === null
                   ? { NULL: true }
-                  : { S: String(v) },
+                  : { S: v as string },
           ]),
         );
   return {
