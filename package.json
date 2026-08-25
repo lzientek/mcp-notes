@@ -8,6 +8,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "tsc --noEmit",
+    "lint:frontend": "tsc --noEmit -p src/frontend/tsconfig.json",
     "cdk": "cdk",
     "synth": "cdk synth",
     "deploy": "cdk deploy"

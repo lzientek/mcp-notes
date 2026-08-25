@@ -42,6 +42,9 @@ jobs:
 
       - run: npm ci
 
+      - name: Type-check frontend
+        run: npm run lint:frontend
+
       - name: Frontend unit tests
         run: npx vitest run tests/unit/frontend/ tests/unit/lambda/helpers/
 
