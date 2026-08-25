@@ -22,17 +22,21 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+type WriteRequest =
+  | { DeleteRequest: { Key: Record<string, unknown> } }
+  | { PutRequest: { Item: Record<string, unknown> } };
+
 /**
- * Deletes every key in batches of 25 instead of one DeleteCommand per item,
- * retrying whatever DynamoDB reports as unprocessed.
+ * Sends write requests in batches of 25, retrying whatever DynamoDB reports as
+ * unprocessed (a throttling signal rather than a failure).
  */
-export async function batchDelete(
+async function batchWrite(
   client: DynamoDBDocumentClient,
   tableName: string,
-  keys: Record<string, unknown>[],
+  allRequests: WriteRequest[],
 ): Promise<void> {
-  for (const group of chunk(keys, BATCH_WRITE_MAX_ITEMS)) {
-    let requests = group.map((Key) => ({ DeleteRequest: { Key } }));
+  for (const group of chunk(allRequests, BATCH_WRITE_MAX_ITEMS)) {
+    let requests = group;
 
     for (let attempt = 0; attempt <= MAX_UNPROCESSED_RETRIES; attempt += 1) {
       const result = await client.send(
@@ -42,12 +46,38 @@ export async function batchDelete(
       const unprocessed = result.UnprocessedItems?.[tableName] ?? [];
       if (unprocessed.length === 0) break;
 
-      requests = unprocessed as typeof requests;
+      requests = unprocessed as WriteRequest[];
       if (attempt < MAX_UNPROCESSED_RETRIES) {
         await delay(50 * 2 ** attempt);
       }
     }
   }
+}
+
+/** Deletes every key in batches of 25 instead of one DeleteCommand per item. */
+export async function batchDelete(
+  client: DynamoDBDocumentClient,
+  tableName: string,
+  keys: Record<string, unknown>[],
+): Promise<void> {
+  await batchWrite(
+    client,
+    tableName,
+    keys.map((Key) => ({ DeleteRequest: { Key } })),
+  );
+}
+
+/** Writes every item in batches of 25 instead of one PutCommand per item. */
+export async function batchPut(
+  client: DynamoDBDocumentClient,
+  tableName: string,
+  items: Record<string, unknown>[],
+): Promise<void> {
+  await batchWrite(
+    client,
+    tableName,
+    items.map((Item) => ({ PutRequest: { Item } })),
+  );
 }
 
 /**

@@ -1,6 +1,7 @@
 import type { DynamoDBStreamEvent } from 'aws-lambda';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, PutCommand, QueryCommand, DeleteCommand } from '@aws-sdk/lib-dynamodb';
+import { DynamoDBDocumentClient, QueryCommand } from '@aws-sdk/lib-dynamodb';
+import { batchDelete, batchPut } from './helpers/dynamo.js';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 import type { AttributeValue } from '@aws-sdk/client-dynamodb';
 import { ulid } from 'ulid';
@@ -10,6 +11,9 @@ const client = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const ACTIVITY_TABLE_NAME = process.env.ACTIVITY_TABLE_NAME!;
 const MAX_EVENTS_PER_NOTE = 200;
 const DIFF_TTL_SECONDS = 30 * 24 * 60 * 60; // 30 days
+const EVENT_TTL_SECONDS = 365 * 24 * 60 * 60; // 1 year
+/** Activity events use an ISO timestamp as sort key; diffs use a "diff#" prefix. */
+const EVENT_SORT_KEY_PREFIX = '20';
 
 interface ActivityEvent {
   noteId: string;
@@ -125,32 +129,47 @@ function detectChanges(
   return { events, diffItems };
 }
 
+/**
+ * Trims a note's oldest activity events past MAX_EVENTS_PER_NOTE.
+ *
+ * The read is bounded: it asks for at most MAX_EVENTS_PER_NOTE + 1 keys, oldest
+ * first, so the common case (a note under the cap) costs one small query instead
+ * of reading the note's whole activity history — diff blobs included — on every
+ * single write. The begins_with keeps diff items out of the count; they carry
+ * their own 30-day TTL.
+ */
 async function purgeOldEvents(noteId: string): Promise<void> {
   const result = await client.send(
     new QueryCommand({
       TableName: ACTIVITY_TABLE_NAME,
-      KeyConditionExpression: 'noteId = :nid',
-      ExpressionAttributeValues: { ':nid': noteId },
+      KeyConditionExpression: 'noteId = :nid AND begins_with(#ts, :eventPrefix)',
+      ExpressionAttributeNames: { '#ts': 'timestamp' },
+      ExpressionAttributeValues: {
+        ':nid': noteId,
+        ':eventPrefix': EVENT_SORT_KEY_PREFIX,
+      },
+      ProjectionExpression: 'noteId, #ts',
       ScanIndexForward: true, // oldest first
+      Limit: MAX_EVENTS_PER_NOTE + 1,
     }),
   );
 
   const items = result.Items ?? [];
   if (items.length <= MAX_EVENTS_PER_NOTE) return;
 
-  // Delete the oldest events beyond the limit
-  const toDelete = items.slice(0, items.length - MAX_EVENTS_PER_NOTE);
-  for (const item of toDelete) {
-    await client.send(
-      new DeleteCommand({
-        TableName: ACTIVITY_TABLE_NAME,
-        Key: { noteId: item.noteId, timestamp: item.timestamp },
-      }),
-    );
-  }
+  await batchDelete(
+    client,
+    ACTIVITY_TABLE_NAME,
+    items
+      .slice(0, items.length - MAX_EVENTS_PER_NOTE)
+      .map((item) => ({ noteId: item.noteId, timestamp: item.timestamp })),
+  );
 }
 
 export const handler = async (event: DynamoDBStreamEvent): Promise<void> => {
+  const itemsToWrite: Record<string, unknown>[] = [];
+  const touchedNoteIds = new Set<string>();
+
   for (const record of event.Records) {
     try {
       const eventName = record.eventName;
@@ -181,43 +200,38 @@ export const handler = async (event: DynamoDBStreamEvent): Promise<void> => {
         const changes = detectChanges(oldImage, newImage);
         events = changes.events;
         diffItems = changes.diffItems;
-      } else if (eventName === 'REMOVE' && oldImage) {
-        // Note deleted — we don't track this in activity (note is gone)
-        // But we could clean up activity records
-        // For now, TTL will handle cleanup
+      } else if (eventName === 'REMOVE') {
+        // Note deleted — nothing to record, the TTL cleans up the history
         continue;
       }
 
-      // Write events to Activity table
-      for (const activityEvent of events) {
-        await client.send(
-          new PutCommand({
-            TableName: ACTIVITY_TABLE_NAME,
-            Item: {
-              ...activityEvent,
-              ttl: Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60, // 1 year
-            },
-          }),
-        );
-      }
+      if (events.length === 0 && diffItems.length === 0) continue;
 
-      // Write diff items (separate TTL of 30 days)
-      for (const diffItem of diffItems) {
-        await client.send(
-          new PutCommand({
-            TableName: ACTIVITY_TABLE_NAME,
-            Item: diffItem,
-          }),
-        );
-      }
+      const eventTtl = Math.floor(Date.now() / 1000) + EVENT_TTL_SECONDS;
+      itemsToWrite.push(
+        ...events.map((activityEvent) => ({ ...activityEvent, ttl: eventTtl })),
+        // Diff items carry their own, shorter TTL.
+        ...diffItems.map((diffItem) => ({ ...diffItem })),
+      );
 
-      // Purge old events if necessary
-      if (events.length > 0) {
-        await purgeOldEvents(noteId);
-      }
+      if (events.length > 0) touchedNoteIds.add(noteId);
     } catch (err) {
-      // Log but don't throw — we don't want to block the stream
+      // Log but don't throw — one bad record must not block the stream.
       console.error('Error processing stream record:', err);
     }
+  }
+
+  try {
+    if (itemsToWrite.length > 0) {
+      await batchPut(client, ACTIVITY_TABLE_NAME, itemsToWrite);
+    }
+
+    // Purge once per note, not once per record: a batch often carries several
+    // updates to the same note.
+    for (const noteId of touchedNoteIds) {
+      await purgeOldEvents(noteId);
+    }
+  } catch (err) {
+    console.error('Error writing activity events:', err);
   }
 };
