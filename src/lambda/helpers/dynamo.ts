@@ -28,7 +28,9 @@ type WriteRequest =
 
 /**
  * Sends write requests in batches of 25, retrying whatever DynamoDB reports as
- * unprocessed (a throttling signal rather than a failure).
+ * unprocessed (a throttling signal rather than a failure). Throws if items are
+ * still unprocessed once the retries run out: callers report success to the
+ * user, so swallowing them here would claim writes that never landed.
  */
 async function batchWrite(
   client: DynamoDBDocumentClient,
@@ -47,9 +49,13 @@ async function batchWrite(
       if (unprocessed.length === 0) break;
 
       requests = unprocessed as WriteRequest[];
-      if (attempt < MAX_UNPROCESSED_RETRIES) {
-        await delay(50 * 2 ** attempt);
+      if (attempt === MAX_UNPROCESSED_RETRIES) {
+        throw new Error(
+          `BatchWrite on ${tableName} left ${String(requests.length)} item(s) ` +
+            `unprocessed after ${String(MAX_UNPROCESSED_RETRIES + 1)} attempts`,
+        );
       }
+      await delay(50 * 2 ** attempt);
     }
   }
 }
@@ -83,6 +89,11 @@ export async function batchPut(
 /**
  * Runs a Query to completion. A FilterExpression is applied after the 1 MB read
  * limit, so a filtered query can return an empty page and still have matches.
+ *
+ * Throws rather than truncating at the page cap: both callers are cascades that
+ * delete a tag or a folder once they have handled the notes returned here, so a
+ * short list would silently leave notes pointing at something that no longer
+ * exists.
  */
 export async function queryAll(
   client: DynamoDBDocumentClient,
@@ -102,7 +113,13 @@ export async function queryAll(
     items.push(...(result.Items ?? []));
     startKey = result.LastEvaluatedKey;
     pages += 1;
-  } while (startKey && pages < MAX_QUERY_PAGES);
+
+    if (startKey && pages >= MAX_QUERY_PAGES) {
+      throw new Error(
+        `Query on ${String(input.TableName)} exceeded ${String(MAX_QUERY_PAGES)} pages`,
+      );
+    }
+  } while (startKey);
 
   return items;
 }
