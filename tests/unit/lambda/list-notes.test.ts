@@ -86,7 +86,22 @@ describe('list-notes handler', () => {
     expect(body.notes[0].noteId).toBe('n1');
   });
 
-  it('returns an opaque cursor built from the last note of the page', async () => {
+  it('resumes where DynamoDB stopped, not at the last returned note', async () => {
+    // A filter can reject most of a page: rewinding to the last returned note
+    // would make the next request re-evaluate everything already rejected.
+    const stopped = { userId: 'user-123', noteId: 'n9', updatedAt: '2025-01-01T00:00:00Z' };
+    mockSend.mockResolvedValue({ Items: [sampleNotes[0]], LastEvaluatedKey: stopped });
+
+    const res = await handler(makeEvent({ limit: '1' }));
+    const body = JSON.parse(res.body);
+    expect(body.notes).toHaveLength(1);
+    expect(mockSend).toHaveBeenCalledTimes(1);
+    const decoded = JSON.parse(Buffer.from(body.nextCursor, 'base64url').toString());
+    expect(decoded).toEqual(stopped);
+    expect(body.hasMore).toBe(true);
+  });
+
+  it('rewinds to the last returned note only when the page was trimmed', async () => {
     mockSend.mockResolvedValue({
       Items: sampleNotes,
       LastEvaluatedKey: { userId: 'user-123', noteId: 'n3', updatedAt: '2025-06-01T00:00:00Z' },
@@ -95,7 +110,32 @@ describe('list-notes handler', () => {
     const body = JSON.parse(res.body);
     expect(body.notes).toHaveLength(2);
     const decoded = JSON.parse(Buffer.from(body.nextCursor, 'base64url').toString());
+    // n3 was read but not returned, so it has to be read again
     expect(decoded).toEqual({ userId: 'user-123', noteId: 'n2', updatedAt: '2026-01-02T00:00:00Z' });
+  });
+
+  it('reports hasMore false and a null cursor on the last page', async () => {
+    mockSend.mockResolvedValue({ Items: sampleNotes });
+    const res = await handler(makeEvent());
+    const body = JSON.parse(res.body);
+    expect(body.nextCursor).toBeNull();
+    expect(body.hasMore).toBe(false);
+  });
+
+  it('rejects a cursor missing a key component', async () => {
+    const cursor = Buffer.from(JSON.stringify({ userId: 'user-123', noteId: 'n2' })).toString('base64url');
+    const res = await handler(makeEvent({ cursor }));
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body).code).toBe('INVALID_CURSOR');
+  });
+
+  it("rejects a cursor pointing into another user's partition", async () => {
+    const cursor = Buffer.from(
+      JSON.stringify({ userId: 'someone-else', noteId: 'n2', updatedAt: '2026-01-02T00:00:00Z' }),
+    ).toString('base64url');
+    const res = await handler(makeEvent({ cursor }));
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body).code).toBe('INVALID_CURSOR');
   });
 
   it('resumes from the cursor instead of restarting the partition', async () => {

@@ -39,24 +39,46 @@ interface PageKey {
   updatedAt: string;
 }
 
-function encodeCursor(key: PageKey | Record<string, unknown>): string {
+function encodeCursor(key: PageKey): string {
   return Buffer.from(JSON.stringify(key)).toString('base64url');
 }
 
-function decodeCursor(cursor: string): Record<string, unknown> {
+function isString(value: unknown): value is string {
+  return typeof value === 'string';
+}
+
+function invalidCursor(): ApiError {
+  return new ApiError(400, {
+    code: 'INVALID_CURSOR',
+    message: 'The pagination cursor is not valid.',
+    remedy: 'Drop the cursor parameter to restart from the first page.',
+  });
+}
+
+/**
+ * Decodes a cursor and checks it is a usable ExclusiveStartKey for this caller.
+ * Without the shape check, a decodable but incomplete key reaches DynamoDB and
+ * comes back as a ValidationException — a 500, where the remedy above is what
+ * the caller actually needs. The userId check keeps the error honest too: the
+ * key condition already binds the query to the caller.
+ */
+function decodeCursor(cursor: string, userId: string): PageKey {
+  let decoded: unknown;
   try {
-    const decoded: unknown = JSON.parse(
-      Buffer.from(cursor, 'base64url').toString('utf8'),
-    );
-    if (!decoded || typeof decoded !== 'object') throw new Error('not an object');
-    return decoded as Record<string, unknown>;
+    decoded = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'));
   } catch {
-    throw new ApiError(400, {
-      code: 'INVALID_CURSOR',
-      message: 'The pagination cursor is not valid.',
-      remedy: 'Drop the cursor parameter to restart from the first page.',
-    });
+    throw invalidCursor();
   }
+
+  if (!decoded || typeof decoded !== 'object') throw invalidCursor();
+  const key = decoded as Record<string, unknown>;
+
+  if (!isString(key.userId) || !isString(key.noteId) || !isString(key.updatedAt)) {
+    throw invalidCursor();
+  }
+  if (key.userId !== userId) throw invalidCursor();
+
+  return { userId: key.userId, noteId: key.noteId, updatedAt: key.updatedAt };
 }
 
 /** Normalises the "to" bound so a bare date stays inclusive. */
@@ -177,8 +199,8 @@ async function queryOwnNotes(
 ): Promise<{ notes: Item[]; nextCursor: string | null }> {
   const filterExpression = buildFilterExpression(filters);
   const collected: Item[] = [];
-  let startKey: Record<string, unknown> | undefined = cursor
-    ? decodeCursor(cursor)
+  let startKey: PageKey | undefined = cursor
+    ? decodeCursor(cursor, userId)
     : undefined;
   let pages = 0;
 
@@ -205,25 +227,30 @@ async function queryOwnNotes(
         ? items.filter((item) => matchesSearch(item, filters.search!))
         : items),
     );
-    startKey = result.LastEvaluatedKey;
+    startKey = result.LastEvaluatedKey as PageKey | undefined;
   } while (startKey && collected.length < limit && pages < MAX_QUERY_PAGES);
 
   const page = collected.slice(0, limit);
-  const last = page[page.length - 1];
-  const hasMore = collected.length > limit || !!startKey;
+  const dropped = collected.slice(limit);
 
+  // Where the next page resumes. Normally that is where DynamoDB stopped, even
+  // if the filters rejected most of what it read: rewinding to the last
+  // *returned* note would make the next request re-evaluate the same items, so
+  // a sparse filter would degrade into re-scanning the partition once per page.
+  // The one exception is a page trimmed by the slice above: those notes were
+  // read but not returned, so they have to be read again.
   let nextCursor: string | null = null;
-  if (hasMore) {
+  if (dropped.length > 0) {
+    const last = page[page.length - 1];
     if (last) {
       nextCursor = encodeCursor({
         userId,
         noteId: last.noteId ?? '',
         updatedAt: last.updatedAt ?? '',
       });
-    } else if (startKey) {
-      // Page emptied by the in-memory search filter — resume where DynamoDB stopped.
-      nextCursor = encodeCursor(startKey);
     }
+  } else if (startKey) {
+    nextCursor = encodeCursor(startKey);
   }
 
   return { notes: withDefaults(page), nextCursor };
@@ -309,7 +336,7 @@ export const handler = withAuth(async (event, { userId, email }) => {
       filters,
       cursor,
     );
-    return jsonResponse(200, { notes, nextCursor });
+    return jsonResponse(200, { notes, nextCursor, hasMore: nextCursor !== null });
   }
 
   // Shared notes live under another user's partition key, so they cannot share a
@@ -329,8 +356,11 @@ export const handler = withAuth(async (event, { userId, email }) => {
     (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''),
   );
 
+  // These scopes cannot paginate, so say so rather than returning a short list
+  // with a null cursor, which is indistinguishable from a complete one.
   return jsonResponse(200, {
     notes: withDefaults(notes.slice(0, limit)),
     nextCursor: null,
+    hasMore: notes.length > limit,
   });
 });

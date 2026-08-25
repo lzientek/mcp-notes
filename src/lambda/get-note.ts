@@ -27,7 +27,7 @@ export const handler = withAuth(async (event, { userId, email }) => {
   }
 
   // Not found as owner — check if caller is a share recipient
-    if (email) {
+  if (email) {
     const sharesResult = await client.send(
       new QueryCommand({
         TableName: SHARES_TABLE_NAME,
