@@ -9,9 +9,9 @@ import {
   DynamoDBDocumentClient,
   GetCommand,
   DeleteCommand,
-  QueryCommand,
-  PutCommand,
+  UpdateCommand,
 } from '@aws-sdk/lib-dynamodb';
+import { mapInBatches, queryAll } from './helpers/dynamo.js';
 
 const client = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const TAGS_TABLE_NAME = process.env.TAGS_TABLE_NAME!;
@@ -38,36 +38,44 @@ export const handler = withAuth(async (event, { userId }) => {
 
   const tagName = tagResult.Item.name as string;
 
-  // Cascade: remove tag name from all user notes that reference it
-  const notesResult = await client.send(
-    new QueryCommand({
-      TableName: TABLE_NAME,
-      KeyConditionExpression: 'userId = :uid',
-      ExpressionAttributeValues: { ':uid': userId },
-    }),
-  );
-
-  const affectedNotes = (notesResult.Items ?? []).filter((note) => {
-    const tags = note.tags as string[] | undefined;
-    return tags && tags.includes(tagName);
+  // Cascade: strip the tag from every note that carries it. DynamoDB does the
+  // matching and returns only what is needed to build the update.
+  const affectedNotes = await queryAll(client, {
+    TableName: TABLE_NAME,
+    KeyConditionExpression: 'userId = :uid',
+    FilterExpression: 'contains(#tags, :tagName)',
+    ExpressionAttributeNames: { '#tags': 'tags' },
+    ExpressionAttributeValues: { ':uid': userId, ':tagName': tagName },
+    ProjectionExpression: 'noteId, #tags',
   });
 
-  // Update each affected note to remove the tag
-  for (const note of affectedNotes) {
-    const currentTags = note.tags as string[];
-    const updatedTags = currentTags.filter((t) => t !== tagName);
+  // REMOVE #tags[i] rewrites one list element instead of the whole note. The
+  // condition makes the index safe: if a concurrent edit shifted the list, the
+  // update fails rather than dropping the wrong tag.
+  const now = new Date().toISOString();
+  await mapInBatches(affectedNotes, async (note) => {
+    const tags = (note.tags as string[] | undefined) ?? [];
+    const index = tags.indexOf(tagName);
+    if (index === -1) return;
 
-    await client.send(
-      new PutCommand({
-        TableName: TABLE_NAME,
-        Item: {
-          ...note,
-          tags: updatedTags,
-          updatedAt: new Date().toISOString(),
-        },
-      }),
-    );
-  }
+    try {
+      await client.send(
+        new UpdateCommand({
+          TableName: TABLE_NAME,
+          Key: { userId, noteId: note.noteId as string },
+          UpdateExpression: `REMOVE #tags[${index}] SET updatedAt = :now`,
+          ConditionExpression: `#tags[${index}] = :tagName`,
+          ExpressionAttributeNames: { '#tags': 'tags' },
+          ExpressionAttributeValues: { ':tagName': tagName, ':now': now },
+        }),
+      );
+    } catch (err) {
+      // The note changed under us; the tag is gone or moved, nothing to repair.
+      if ((err as { name?: string }).name !== 'ConditionalCheckFailedException') {
+        throw err;
+      }
+    }
+  });
 
   // Delete the tag
   await client.send(
