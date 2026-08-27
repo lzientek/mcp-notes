@@ -19,8 +19,8 @@ export interface McpNotesConfig {
   apiCertificateArn: string;
   /** Origins allowed to call the API, most-canonical first */
   allowedOrigins: string[];
-  /** Where CloudWatch alarms and the budget notification go, when set */
-  alertEmail?: string;
+  /** Where CloudWatch alarms and the budget notification go */
+  alertEmail: string;
   /** Monthly spend, in USD, above which the budget notifies */
   monthlyBudgetUsd: number;
 }
@@ -35,7 +35,8 @@ const PROD_CONFIG: McpNotesConfig = {
   apiCertificateArn:
     'arn:aws:acm:eu-west-1:171161696369:certificate/ab893409-9541-4092-8ca9-73bad470be95',
   allowedOrigins: ['https://www.notlai.com', 'https://notlai.com'],
-  monthlyBudgetUsd: 20,
+  alertEmail: 'lucas@zientek.fr',
+  monthlyBudgetUsd: 10,
 };
 
 /**
@@ -44,9 +45,10 @@ const PROD_CONFIG: McpNotesConfig = {
  *
  *   npx cdk deploy -c devOrigins=http://localhost:5173
  *
- * Alarms and the budget notify only when an address is supplied:
+ * Alarms and the budget notify the address below by default; context overrides
+ * it, which is what a non-production deployment wants:
  *
- *   npx cdk deploy -c alertEmail=you@example.com -c monthlyBudgetUsd=20
+ *   npx cdk deploy -c alertEmail=someone@example.com -c monthlyBudgetUsd=50
  */
 export function resolveConfig(node: Node): McpNotesConfig {
   const devOrigins = node.tryGetContext('devOrigins') as string | undefined;
